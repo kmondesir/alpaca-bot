@@ -8,7 +8,7 @@ for setup and configuration.
 Scaffolding, config, logging, the `Trade` wrapper and SQLite order tracking are
 in place. Nothing has been run against a real Alpaca account yet; all checks so
 far used mocked clients or no network. `start.py` checks `STATE` and the keys,
-then syncs pending orders — no trading strategy yet. No git commits yet.
+then syncs pending orders — no trading strategy yet. Initial commit 0d61199 on main (local only, no remote).
 
 ## Execution model
 
