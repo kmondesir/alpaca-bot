@@ -1,0 +1,4 @@
+{
+  "prod": "https://api.alpaca.markets",
+  "demo": "https://paper-api.alpaca.markets"
+}
