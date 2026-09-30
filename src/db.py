@@ -39,7 +39,10 @@ CREATE TABLE IF NOT EXISTS orders (
     description     TEXT,
     costs           REAL,
     linked_order_id TEXT,
-    basis           REAL
+    basis           REAL,
+    side            TEXT,
+    quantity        REAL,
+    order_type      TEXT
 )
 """
 
@@ -60,6 +63,9 @@ class OrderDB:
             for ddl in (
                 "ALTER TABLE orders ADD COLUMN linked_order_id TEXT",
                 "ALTER TABLE orders ADD COLUMN basis REAL",
+                "ALTER TABLE orders ADD COLUMN side TEXT",
+                "ALTER TABLE orders ADD COLUMN quantity REAL",
+                "ALTER TABLE orders ADD COLUMN order_type TEXT",
             ):
                 try:
                     self.conn.execute(ddl)
@@ -74,12 +80,14 @@ class OrderDB:
         costs: Optional[float] = None,
         linked_order_id: Optional[str] = None,
         basis: Optional[float] = None,
+        side: Optional[str] = None,
+        quantity: Optional[float] = None,
+        order_type: Optional[str] = None,
     ) -> None:
         """Insert or update an order row.
 
         created and hostname are set on insert only; modified is always
-        refreshed. description, costs, linked_order_id and basis are left
-        unchanged when None.
+        refreshed. Other fields are left unchanged when None.
         """
         if status not in STATUSES:
             raise ValueError(f"Unknown status {status!r}")
@@ -89,15 +97,18 @@ class OrderDB:
                 """
                 INSERT INTO orders
                     (client_order_id, hostname, status, created, modified, description, costs,
-                     linked_order_id, basis)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     linked_order_id, basis, side, quantity, order_type)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (client_order_id) DO UPDATE SET
                     status          = excluded.status,
                     modified        = excluded.modified,
                     description     = COALESCE(excluded.description, orders.description),
                     costs           = COALESCE(excluded.costs, orders.costs),
                     linked_order_id = COALESCE(excluded.linked_order_id, orders.linked_order_id),
-                    basis           = COALESCE(excluded.basis, orders.basis)
+                    basis           = COALESCE(excluded.basis, orders.basis),
+                    side            = COALESCE(excluded.side, orders.side),
+                    quantity        = COALESCE(excluded.quantity, orders.quantity),
+                    order_type      = COALESCE(excluded.order_type, orders.order_type)
                 """,
                 (
                     client_order_id,
@@ -109,6 +120,9 @@ class OrderDB:
                     costs,
                     linked_order_id,
                     basis,
+                    side,
+                    quantity,
+                    order_type,
                 ),
             )
 
@@ -120,6 +134,9 @@ class OrderDB:
         costs: Optional[float] = None,
         linked_order_id: Optional[str] = None,
         basis: Optional[float] = None,
+        side: Optional[str] = None,
+        quantity: Optional[float] = None,
+        order_type: Optional[str] = None,
     ) -> None:
         """Update fields on an existing order row, leaving None fields unchanged.
 
@@ -137,10 +154,24 @@ class OrderDB:
                     description     = COALESCE(?, description),
                     costs           = COALESCE(?, costs),
                     linked_order_id = COALESCE(?, linked_order_id),
-                    basis           = COALESCE(?, basis)
+                    basis           = COALESCE(?, basis),
+                    side            = COALESCE(?, side),
+                    quantity        = COALESCE(?, quantity),
+                    order_type      = COALESCE(?, order_type)
                 WHERE client_order_id = ?
                 """,
-                (status, now, description, costs, linked_order_id, basis, client_order_id),
+                (
+                    status,
+                    now,
+                    description,
+                    costs,
+                    linked_order_id,
+                    basis,
+                    side,
+                    quantity,
+                    order_type,
+                    client_order_id,
+                ),
             )
             if cursor.rowcount == 0:
                 raise KeyError(f"No order found for client_order_id {client_order_id!r}")
