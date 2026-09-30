@@ -39,25 +39,25 @@ MAX_CONSECUTIVE_LOSS=5
 LOSS_DIRECTORY=status
 ```
 
-| Variable               | Default          | Description                                                                                                             |
-| ---------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `ALPACA_API_KEY`       | _(empty)_        | Alpaca API key.                                                                                                         |
-| `ALPACA_SECRET_KEY`    | _(empty)_        | Alpaca API secret.                                                                                                      |
-| `ALPACA_BASE_URL`      | _(empty)_        | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`. |
-| `DEMO`                 | `true`           | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                        |
-| `STATE`                | `false`          | Kill switch. The script only runs when `true`; otherwise it logs a message and exits.                                   |
-| `LOG_DIRECTORY`        | `logs`           | Folder for log files, relative to the project root. Created if missing.                                                 |
-| `LOG_NAME`             | `alpaca.log`     | Log file name.                                                                                                          |
-| `MAX_SIZE_IN_MB`       | `10`             | Size at which the log file rotates. Decimals allowed.                                                                   |
-| `MAX_BACKUP`           | `5`              | Number of rotated files to keep (`alpaca.log.1` … `alpaca.log.5`).                                                      |
-| `LOG_LEVEL`            | `INFO`           | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`.                                                                      |
-| `PREFIX`               | `alpaca`         | Prefix for generated order tags: `client_order_id` is `<PREFIX>-<uuid7>`. Max 91 characters.                            |
-| `DB_PATH`              | `data/alpaca.db` | SQLite order-tracking database, relative to the project root. Created if missing.                                       |
-| `WAGER`                | `0.04`           | Fraction of account buying power used for a new position. For example, `0.04` sizes a position at 4% of buying power.   |
-| `TAKE_PROFIT`          | `0.5`            | Fraction above the purchase price for the take-profit exit. For example, `0.5` targets 50% above entry.                 |
-| `TRAILING_STOP_LOSS`   | `0.05`           | Fraction the trailing stop follows below the running high price. For example, `0.05` trails by 5%.                      |
-| `MAX_CONSECUTIVE_LOSS` | `5`              | Consecutive losing trades allowed before the bot sets `STATE=false` in `.env`.                                          |
-| `LOSS_DIRECTORY`       | `status`         | Directory, relative to the project root, for `losses.json`, which stores loss history and the consecutive-loss count.   |
+| Variable               | Default          | Description                                                                                                              |
+| ---------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `ALPACA_API_KEY`       | _(empty)_        | Alpaca API key.                                                                                                          |
+| `ALPACA_SECRET_KEY`    | _(empty)_        | Alpaca API secret.                                                                                                       |
+| `ALPACA_BASE_URL`      | _(empty)_        | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`.  |
+| `DEMO`                 | `true`           | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                         |
+| `STATE`                | `false`          | Kill switch. The script only runs when `true`; otherwise it logs a message and exits.                                    |
+| `LOG_DIRECTORY`        | `logs`           | Folder for log files, relative to the project root. Created if missing.                                                  |
+| `LOG_NAME`             | `alpaca.log`     | Log file name.                                                                                                           |
+| `MAX_SIZE_IN_MB`       | `10`             | Size at which the log file rotates. Decimals allowed.                                                                    |
+| `MAX_BACKUP`           | `5`              | Number of rotated files to keep (`alpaca.log.1` … `alpaca.log.5`).                                                       |
+| `LOG_LEVEL`            | `INFO`           | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`.                                                                       |
+| `PREFIX`               | `alpaca`         | Prefix for generated order tags: `client_order_id` is `<PREFIX>-<uuid7>`. Max 91 characters.                             |
+| `DB_PATH`              | `data/alpaca.db` | SQLite order-tracking database, relative to the project root. Created if missing.                                        |
+| `WAGER`                | `0.04`           | Fraction of account buying power used for a new position. For example, `0.04` sizes a position at 4% of buying power.    |
+| `TAKE_PROFIT`          | `0.5`            | Fraction above the purchase price for the take-profit exit. For example, `0.5` targets 50% above entry; `0` disables it. |
+| `TRAILING_STOP_LOSS`   | `0.05`           | Fraction the trailing stop follows below the running high price. For example, `0.05` trails by 5%; `0` disables it.      |
+| `MAX_CONSECUTIVE_LOSS` | `5`              | Consecutive losing trades allowed before the bot sets `STATE=false` in `.env`; `0` disables this kill switch.            |
+| `LOSS_DIRECTORY`       | `status`         | Directory, relative to the project root, for `losses.json`, which stores loss history and the consecutive-loss count.    |
 
 ### Risk management
 
@@ -65,7 +65,8 @@ LOSS_DIRECTORY=status
   position size changes as the account balance changes.
 - A filled take-profit or trailing-stop exit is recorded as a trade outcome.
   Once the loss streak reaches `MAX_CONSECUTIVE_LOSS`, the bot writes
-  `STATE=false` to `.env`; the next run exits without trading.
+  `STATE=false` to `.env`; the next run exits without trading. Set the limit
+  to `0` to disable this automatic kill switch while keeping loss history.
 - The loss tracker is created at `LOSS_DIRECTORY/losses.json` when needed. It
   persists across runs. To reset it after reviewing the losses, manually set
   `STATE=true` and delete the tracker file.
@@ -113,7 +114,7 @@ cancellations and expiries from Alpaca.
 | `description`     | Free text passed to `place_order(description=...)`; replaced with a summary of the close when the order is closed. |
 | `costs`           | Filled quantity × average fill price.                                                                              |
 | `linked_order_id` | Client order ID of a linked protective exit (take-profit/trailing-stop).                                           |
-| `basis`           | Entry cost basis used to calculate P/L for a tracked exit.                                                          |
+| `basis`           | Entry cost basis used to calculate P/L for a tracked exit.                                                         |
 
 | Status      | Meaning                                                                                            |
 | ----------- | -------------------------------------------------------------------------------------------------- |

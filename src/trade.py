@@ -210,36 +210,48 @@ class Trade:
         avg_price: float,
         description: Optional[str] = None,
     ) -> tuple:
-        """Submit linked take-profit and trailing-stop sell orders for a filled position.
+        """Submit enabled protective sell orders for a filled position.
 
-        take_profit exits at avg_price * (1 + config.TAKE_PROFIT); the trailing
-        stop trails config.TRAILING_STOP_LOSS behind the running high, letting a
-        trend run until it reverses by that fraction. The two orders are linked
-        in the database so sync_orders() cancels one when the other fills.
+        A zero take-profit or trailing-stop setting disables that exit. When
+        both are enabled, they are linked so sync_orders() cancels the sibling
+        after one fills. The return value is always (take_profit, trailing_stop),
+        with None for any disabled exit.
         """
-        take_profit_price = round(avg_price * (1 + config.TAKE_PROFIT), 2)
-        take_profit_id = config.new_client_order_id()
-        trailing_stop_id = config.new_client_order_id()
         basis = qty * avg_price
+        take_profit = None
+        trailing_stop = None
+        take_profit_id = None
+        trailing_stop_id = None
 
-        take_profit = self.place_order(
-            symbol,
-            "sell",
-            qty=qty,
-            limit_price=take_profit_price,
-            client_order_id=take_profit_id,
-            description=description or f"take-profit for {symbol}",
-        )
-        trailing_stop = self.place_order(
-            symbol,
-            "sell",
-            qty=qty,
-            trail_percent=config.TRAILING_STOP_LOSS * 100,
-            client_order_id=trailing_stop_id,
-            description=description or f"trailing-stop for {symbol}",
-        )
-        self.db.update(take_profit_id, linked_order_id=trailing_stop_id, basis=basis)
-        self.db.update(trailing_stop_id, linked_order_id=take_profit_id, basis=basis)
+        if config.TAKE_PROFIT > 0:
+            take_profit_id = config.new_client_order_id()
+            take_profit_price = round(avg_price * (1 + config.TAKE_PROFIT), 2)
+            take_profit = self.place_order(
+                symbol,
+                "sell",
+                qty=qty,
+                limit_price=take_profit_price,
+                client_order_id=take_profit_id,
+                description=description or f"take-profit for {symbol}",
+            )
+        if config.TRAILING_STOP_LOSS > 0:
+            trailing_stop_id = config.new_client_order_id()
+            trailing_stop = self.place_order(
+                symbol,
+                "sell",
+                qty=qty,
+                trail_percent=config.TRAILING_STOP_LOSS * 100,
+                client_order_id=trailing_stop_id,
+                description=description or f"trailing-stop for {symbol}",
+            )
+
+        if take_profit_id and trailing_stop_id:
+            self.db.update(take_profit_id, linked_order_id=trailing_stop_id, basis=basis)
+            self.db.update(trailing_stop_id, linked_order_id=take_profit_id, basis=basis)
+        elif take_profit_id:
+            self.db.update(take_profit_id, basis=basis)
+        elif trailing_stop_id:
+            self.db.update(trailing_stop_id, basis=basis)
         return take_profit, trailing_stop
 
     def close_order(self, client_order_id: str):

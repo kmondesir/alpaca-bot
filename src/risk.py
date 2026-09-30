@@ -52,6 +52,6 @@ def record_trade(client_order_id: str, pnl: float, symbol: Optional[str] = None)
 
     streak = data["consecutive_losses"]
     logger.info("%s: pnl=%.2f, consecutive_losses=%d", client_order_id, pnl, streak)
-    if streak >= config.MAX_CONSECUTIVE_LOSSES:
+    if config.MAX_CONSECUTIVE_LOSSES > 0 and streak >= config.MAX_CONSECUTIVE_LOSSES:
         logger.error("%d consecutive losses; switching STATE off in .env", streak)
         set_key(str(ENV_FILE), "STATE", "false")
