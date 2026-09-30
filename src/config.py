@@ -28,8 +28,8 @@ with open(SRC_DIR / "config.json", encoding="utf-8") as f:
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
 DEMO = os.getenv("DEMO", "true").lower() == "true"
-# Trading API base URL: the paper endpoint when DEMO, otherwise live.
-BASE_URL = CONFIG["demo"] if DEMO else CONFIG["prod"]
+# Trading API base URL, e.g. https://paper-api.alpaca.markets or https://api.alpaca.markets.
+BASE_URL = os.getenv("ALPACA_BASE_URL", "")
 # Kill switch: the script only runs when STATE=true.
 STATE = os.getenv("STATE", "false").lower() == "true"
 
@@ -40,6 +40,19 @@ if len(PREFIX) > 128 - 37:
 
 # Relative DB_PATH paths resolve from the project root.
 DB_PATH = ROOT_DIR / os.getenv("DB_PATH", "data/alpaca.db")
+
+# Risk management
+# WAGER: fraction of buying power risked per new position (scales with balance).
+WAGER = float(os.getenv("WAGER", "0.04"))
+# TAKE_PROFIT: fraction above the fill price at which the take-profit sell exits.
+TAKE_PROFIT = float(os.getenv("TAKE_PROFIT", "0.5"))
+# TRAILING_STOP_LOSS: fraction below the running high-water mark that triggers the trailing stop.
+TRAILING_STOP_LOSS = float(os.getenv("TRAILING_STOP_LOSS", "0.05"))
+# MAX_CONSECUTIVE_LOSSES: after this many losing trades in a row, STATE is switched off.
+MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSS", "5"))
+
+# Relative LOSS_DIRECTORY paths resolve from the project root.
+LOSS_DIRECTORY = ROOT_DIR / os.getenv("LOSS_DIRECTORY", "status")
 
 # Relative LOG_DIRECTORY paths resolve from the project root.
 LOG_DIRECTORY = ROOT_DIR / os.getenv("LOG_DIRECTORY", "logs")
