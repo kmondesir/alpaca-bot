@@ -3,7 +3,9 @@
 import logging
 
 import config
+import risk
 from db import OrderDB
+from strategy import MacdPsarStrategy
 from trade import Trade
 
 logger = logging.getLogger(__name__)
@@ -20,8 +22,9 @@ def main() -> None:
 
     db = OrderDB()
     trade = Trade(config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY, config.BASE_URL, db)
-    # Pick up fills, cancellations and expiries since the previous run.
     trade.sync_orders()
+    signals = MacdPsarStrategy(trade.stock_data, config.STRATEGY_SYMBOLS).generate_signals()
+    risk.process_strategy_signals(trade, signals)
 
 
 if __name__ == "__main__":

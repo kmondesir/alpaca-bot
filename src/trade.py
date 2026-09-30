@@ -5,15 +5,23 @@ orders table (see db.py), so later cron runs know what earlier runs did.
 """
 
 import logging
+import math
 from typing import Optional
 
 from alpaca.common.exceptions import APIError
 from alpaca.data.historical import CryptoHistoricalDataClient, StockHistoricalDataClient
 from alpaca.data.requests import CryptoLatestQuoteRequest, StockLatestQuoteRequest
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import AssetClass, OrderSide, OrderStatus, TimeInForce
+from alpaca.trading.enums import (
+    AssetClass,
+    OrderSide,
+    OrderStatus,
+    QueryOrderStatus,
+    TimeInForce,
+)
 from alpaca.trading.requests import (
     ClosePositionRequest,
+    GetOrdersRequest,
     LimitOrderRequest,
     MarketOrderRequest,
     TrailingStopOrderRequest,
@@ -67,7 +75,15 @@ class Trade:
     def _record(self, order, description: Optional[str] = None) -> str:
         """Save the order's current Alpaca state to the database."""
         status = _db_status(order)
-        self.db.save(order.client_order_id, status, description, _costs(order))
+        self.db.save(
+            order.client_order_id,
+            status,
+            description,
+            _costs(order),
+            side=order.side.value,
+            quantity=float(order.qty) if order.qty is not None else None,
+            order_type=order.order_type.value,
+        )
         return status
 
     def sync_orders(self) -> None:
@@ -102,7 +118,11 @@ class Trade:
             return
         row = self.db.get(client_order_id)
         if row["basis"] is not None:
-            risk.record_trade(client_order_id, row["costs"] - row["basis"], symbol)
+            closing_side = row["side"]
+            pnl = row["basis"] - row["costs"] if closing_side == OrderSide.BUY.value else row["costs"] - row["basis"]
+            risk.record_trade(client_order_id, pnl, symbol)
+            entry_side = OrderSide.SELL.value if closing_side == OrderSide.BUY.value else OrderSide.BUY.value
+            risk.mark_strategy_position_closed(symbol, entry_side)
         if row["linked_order_id"]:
             self._cancel_sibling(row["linked_order_id"])
 
@@ -127,6 +147,28 @@ class Trade:
             "buying_power": float(account.buying_power),
             "portfolio_value": float(account.portfolio_value),
         }
+
+    def is_market_open(self) -> bool:
+        """Return whether the market is open, including holiday and early-close schedules."""
+        return self.client.get_clock().is_open
+
+    def _check_position_limit(self, symbol: str) -> None:
+        """Reject a new symbol when open positions and pending orders fill the cap."""
+        positions = self.client.get_all_positions()
+        pending_orders = self.client.get_orders(
+            filter=GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=500)
+        )
+        occupied_symbols = {position.symbol.upper() for position in positions}
+        occupied_symbols.update(order.symbol.upper() for order in pending_orders)
+        if symbol.upper() in occupied_symbols:
+            return
+        if len(occupied_symbols) >= config.MAX_OPEN_POSITIONS:
+            message = (
+                f"Maximum open positions reached ({len(occupied_symbols)}/"
+                f"{config.MAX_OPEN_POSITIONS}); cannot open {symbol}"
+            )
+            logger.warning(message)
+            raise RuntimeError(message)
 
     def place_order(
         self,
@@ -154,27 +196,39 @@ class Trade:
             raise ValueError("Pass exactly one of qty or notional")
         if limit_price is not None and trail_percent is not None:
             raise ValueError("Pass at most one of limit_price or trail_percent")
+        order_side = OrderSide(side.lower())
+        self._check_position_limit(symbol)
         client_order_id = client_order_id or config.new_client_order_id()
 
         params = dict(
             symbol=symbol,
             qty=qty,
             notional=notional,
-            side=OrderSide(side.lower()),
+            side=order_side,
             time_in_force=TimeInForce(time_in_force.lower()),
             client_order_id=client_order_id,
         )
         if trail_percent is None:
             if limit_price is None:
+                order_type = "market"
                 request = MarketOrderRequest(**params)
             else:
+                order_type = "limit"
                 request = LimitOrderRequest(**params, limit_price=limit_price)
         else:
+            order_type = "trailing_stop"
             request = TrailingStopOrderRequest(**params, trail_percent=trail_percent)
 
         # Record first: if the submit times out after reaching Alpaca, the
         # next sync_orders() still finds the order under this tag.
-        self.db.save(client_order_id, "NA", description)
+        self.db.save(
+            client_order_id,
+            "NA",
+            description,
+            side=order_side.value,
+            quantity=qty,
+            order_type=order_type,
+        )
         order = self.client.submit_order(order_data=request)
         self._record(order)
         logger.info("Placed %s %s %s (%s)", side, qty or notional, symbol, client_order_id)
@@ -187,6 +241,7 @@ class Trade:
         limit_price: Optional[float] = None,
         time_in_force: str = "day",
         description: Optional[str] = None,
+        client_order_id: Optional[str] = None,
     ):
         """Place an entry order sized as a fraction (config.WAGER) of buying power.
 
@@ -194,12 +249,32 @@ class Trade:
         change the notional of the next trade.
         """
         notional = self.get_balance()["buying_power"] * config.WAGER
+        if side.lower() == OrderSide.SELL.value:
+            asset = self.get_asset_data(symbol)
+            if not asset["shortable"]:
+                raise RuntimeError(f"{symbol} is not shortable")
+            reference_price = float(asset["bid"] or 0)
+            if reference_price <= 0:
+                raise RuntimeError(f"No valid bid price available to short {symbol}")
+            scale = 1_000_000 if asset["fractionable"] else 1
+            qty = math.floor(notional / reference_price * scale) / scale
+            if qty <= 0:
+                raise RuntimeError(f"Buying power is too small to short one share of {symbol}")
+            return self.place_order(
+                symbol,
+                side,
+                qty=qty,
+                time_in_force=time_in_force,
+                client_order_id=client_order_id,
+                description=description,
+            )
         return self.place_order(
             symbol,
             side,
             notional=notional,
             limit_price=limit_price,
             time_in_force=time_in_force,
+            client_order_id=client_order_id,
             description=description,
         )
 
@@ -209,8 +284,9 @@ class Trade:
         qty: float,
         avg_price: float,
         description: Optional[str] = None,
+        position_side: str = "buy",
     ) -> tuple:
-        """Submit enabled protective sell orders for a filled position.
+        """Submit enabled protective exits for a filled long or short position.
 
         A zero take-profit or trailing-stop setting disables that exit. When
         both are enabled, they are linked so sync_orders() cancels the sibling
@@ -218,6 +294,10 @@ class Trade:
         with None for any disabled exit.
         """
         basis = qty * avg_price
+        entry_side = OrderSide(position_side.lower())
+        if entry_side not in (OrderSide.BUY, OrderSide.SELL):
+            raise ValueError("position_side must be 'buy' or 'sell'")
+        exit_side = OrderSide.SELL if entry_side == OrderSide.BUY else OrderSide.BUY
         take_profit = None
         trailing_stop = None
         take_profit_id = None
@@ -225,10 +305,13 @@ class Trade:
 
         if config.TAKE_PROFIT > 0:
             take_profit_id = config.new_client_order_id()
-            take_profit_price = round(avg_price * (1 + config.TAKE_PROFIT), 2)
+            multiplier = 1 + config.TAKE_PROFIT if entry_side == OrderSide.BUY else 1 - config.TAKE_PROFIT
+            take_profit_price = round(avg_price * multiplier, 2)
+            if take_profit_price <= 0:
+                raise ValueError("TAKE_PROFIT must be less than 1 for a short position")
             take_profit = self.place_order(
                 symbol,
-                "sell",
+                exit_side.value,
                 qty=qty,
                 limit_price=take_profit_price,
                 client_order_id=take_profit_id,
@@ -238,7 +321,7 @@ class Trade:
             trailing_stop_id = config.new_client_order_id()
             trailing_stop = self.place_order(
                 symbol,
-                "sell",
+                exit_side.value,
                 qty=qty,
                 trail_percent=config.TRAILING_STOP_LOSS * 100,
                 client_order_id=trailing_stop_id,
@@ -294,6 +377,9 @@ class Trade:
             f"close_order: closing order for {client_order_id}",
             _costs(closing),
             basis=_costs(order),
+            side=closing.side.value,
+            quantity=float(closing.qty) if closing.qty is not None else None,
+            order_type=closing.order_type.value,
         )
         self._finalize(closing.client_order_id, closing_status, order.symbol)
         logger.info("Closed %s of %s (%s)", filled, order.symbol, client_order_id)

@@ -22,6 +22,7 @@ ALPACA_API_KEY=
 ALPACA_SECRET_KEY=
 DEMO=true
 STATE=false
+STRATEGY_SYMBOLS=
 
 LOG_DIRECTORY=logs
 LOG_NAME=alpaca.log
@@ -36,33 +37,39 @@ WAGER=0.04
 TAKE_PROFIT=0.5
 TRAILING_STOP_LOSS=0.05
 MAX_CONSECUTIVE_LOSS=5
+MAX_OPEN_POSITIONS=3
 LOSS_DIRECTORY=status
 ```
 
-| Variable               | Default          | Description                                                                                                              |
-| ---------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `ALPACA_API_KEY`       | _(empty)_        | Alpaca API key.                                                                                                          |
-| `ALPACA_SECRET_KEY`    | _(empty)_        | Alpaca API secret.                                                                                                       |
-| `ALPACA_BASE_URL`      | _(empty)_        | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`.  |
-| `DEMO`                 | `true`           | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                         |
-| `STATE`                | `false`          | Kill switch. The script only runs when `true`; otherwise it logs a message and exits.                                    |
-| `LOG_DIRECTORY`        | `logs`           | Folder for log files, relative to the project root. Created if missing.                                                  |
-| `LOG_NAME`             | `alpaca.log`     | Log file name.                                                                                                           |
-| `MAX_SIZE_IN_MB`       | `10`             | Size at which the log file rotates. Decimals allowed.                                                                    |
-| `MAX_BACKUP`           | `5`              | Number of rotated files to keep (`alpaca.log.1` … `alpaca.log.5`).                                                       |
-| `LOG_LEVEL`            | `INFO`           | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`.                                                                       |
-| `PREFIX`               | `alpaca`         | Prefix for generated order tags: `client_order_id` is `<PREFIX>-<uuid7>`. Max 91 characters.                             |
-| `DB_PATH`              | `data/alpaca.db` | SQLite order-tracking database, relative to the project root. Created if missing.                                        |
-| `WAGER`                | `0.04`           | Fraction of account buying power used for a new position. For example, `0.04` sizes a position at 4% of buying power.    |
-| `TAKE_PROFIT`          | `0.5`            | Fraction above the purchase price for the take-profit exit. For example, `0.5` targets 50% above entry; `0` disables it. |
-| `TRAILING_STOP_LOSS`   | `0.05`           | Fraction the trailing stop follows below the running high price. For example, `0.05` trails by 5%; `0` disables it.      |
-| `MAX_CONSECUTIVE_LOSS` | `5`              | Consecutive losing trades allowed before the bot sets `STATE=false` in `.env`; `0` disables this kill switch.            |
-| `LOSS_DIRECTORY`       | `status`         | Directory, relative to the project root, for `losses.json`, which stores loss history and the consecutive-loss count.    |
+| Variable               | Default          | Description                                                                                                                     |
+| ---------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `ALPACA_API_KEY`       | _(empty)_        | Alpaca API key.                                                                                                                 |
+| `ALPACA_SECRET_KEY`    | _(empty)_        | Alpaca API secret.                                                                                                              |
+| `ALPACA_BASE_URL`      | _(empty)_        | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`.         |
+| `DEMO`                 | `true`           | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                                |
+| `STATE`                | `false`          | Kill switch. The script only runs when `true`; otherwise it logs a message and exits.                                           |
+| `STRATEGY_SYMBOLS`     | _(empty)_        | Comma-separated stock symbols for MACD/Parabolic SAR signals, e.g. `SPY,AAPL`. Empty disables strategy entries.                 |
+| `LOG_DIRECTORY`        | `logs`           | Folder for log files, relative to the project root. Created if missing.                                                         |
+| `LOG_NAME`             | `alpaca.log`     | Log file name.                                                                                                                  |
+| `MAX_SIZE_IN_MB`       | `10`             | Size at which the log file rotates. Decimals allowed.                                                                           |
+| `MAX_BACKUP`           | `5`              | Number of rotated files to keep (`alpaca.log.1` … `alpaca.log.5`).                                                              |
+| `LOG_LEVEL`            | `INFO`           | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`.                                                                              |
+| `PREFIX`               | `alpaca`         | Prefix for generated order tags: `client_order_id` is `<PREFIX>-<uuid7>`. Max 91 characters.                                    |
+| `DB_PATH`              | `data/alpaca.db` | SQLite order-tracking database, relative to the project root. Created if missing.                                               |
+| `WAGER`                | `0.04`           | Fraction of account buying power used for a new position. For example, `0.04` sizes a position at 4% of buying power.           |
+| `TAKE_PROFIT`          | `0.5`            | Fraction above the purchase price for the take-profit exit. For example, `0.5` targets 50% above entry; `0` disables it.        |
+| `TRAILING_STOP_LOSS`   | `0.05`           | Fraction the trailing stop follows below the running high price. For example, `0.05` trails by 5%; `0` disables it.             |
+| `MAX_CONSECUTIVE_LOSS` | `5`              | Consecutive losing trades allowed before the bot sets `STATE=false` in `.env`; `0` disables this kill switch.                   |
+| `MAX_OPEN_POSITIONS`   | `3`              | Maximum number of distinct open positions. Pending orders reserve a slot; additional orders for an existing symbol are allowed. |
+| `LOSS_DIRECTORY`       | `status`         | Directory, relative to the project root, for `losses.json`, which stores loss history and the consecutive-loss count.           |
 
 ### Risk management
 
 - `WAGER` is applied to buying power each time a new position is opened, so
   position size changes as the account balance changes.
+- New symbols are rejected when `MAX_OPEN_POSITIONS` is reached. Existing
+  positions and pending buy orders count toward the limit; buys that add to an
+  already-open symbol do not consume another slot.
 - A filled take-profit or trailing-stop exit is recorded as a trade outcome.
   Once the loss streak reaches `MAX_CONSECUTIVE_LOSS`, the bot writes
   `STATE=false` to `.env`; the next run exits without trading. Set the limit
@@ -115,6 +122,9 @@ cancellations and expiries from Alpaca.
 | `costs`           | Filled quantity × average fill price.                                                                              |
 | `linked_order_id` | Client order ID of a linked protective exit (take-profit/trailing-stop).                                           |
 | `basis`           | Entry cost basis used to calculate P/L for a tracked exit.                                                         |
+| `side`            | Order side (`buy` or `sell`).                                                                                      |
+| `quantity`        | Order quantity in shares or units; null for notional-only requests if Alpaca has no quantity.                      |
+| `order_type`      | Order type (`market`, `limit`, or `trailing_stop`).                                                                |
 
 | Status      | Meaning                                                                                            |
 | ----------- | -------------------------------------------------------------------------------------------------- |
@@ -135,6 +145,17 @@ prefixes, and positions not in the database, are left alone.
 | `SKIPPED` | Never reached Alpaca (e.g. the submit failed). |
 
 ## Run
+
+### Strategy
+
+Set `STRATEGY_SYMBOLS` to a comma-separated list of stocks (for example,
+`SPY,AAPL`) to enable signal generation. The strategy checks closed 15-minute
+MACD (12/26/9) bars for bullish crosses below zero or bearish crosses above
+zero, confirmed by Parabolic SAR on both 1-minute and 5-minute bars. It only
+returns signals; `start.py` sends them to `risk.py`, which requires `STATE=true`
+and an open Alpaca market, prevents duplicate entries, applies `WAGER`, and
+handles protective exits and tracked reversals. An empty symbol list creates
+no signals.
 
 Set `STATE=true` in `.env`, then:
 

@@ -5,19 +5,21 @@ for setup and configuration.
 
 ## Status
 
-Scaffolding, config, logging, the `Trade` wrapper and SQLite order tracking are
-in place. Nothing has been run against a real Alpaca account yet; all checks so
-far used mocked clients or no network. `start.py` checks `STATE` and the keys,
-then syncs pending orders — no trading strategy yet. Initial commit 0d61199 on main (local only, no remote).
+Scaffolding, config, logging, the `Trade` wrapper, SQLite order tracking, and a
+MACD/Parabolic SAR signal strategy are in place. Nothing has been run against a
+real Alpaca account; checks use mocked clients or no network. `start.py` checks
+`STATE` and credentials, syncs orders, then routes strategy signals through
+`risk.py`. Initial commit 0d61199 on main (local only, no remote).
 
 ## Execution model
 
 `start.py` does not poll or loop. A cron job runs it every 60 seconds; each run
 does its work and exits. So nothing stays in memory between runs. State that
-must carry over lives in the `orders` table (`src/db.py`). Don't add
-sleep/poll loops.
+must carry over lives in the `orders` table (`src/db.py`) and risk-owned
+`strategy_signals` table in the same SQLite database. Don't add sleep/poll
+loops.
 
-Each run: `STATE` check → key check → `Trade.sync_orders()` → (strategy, TBD).
+Each run: `STATE` check → key check → `Trade.sync_orders()` → signal generation → risk gates and execution.
 
 ## Files
 
@@ -26,23 +28,27 @@ Each run: `STATE` check → key check → `Trade.sync_orders()` → (strategy, T
 - `src/config.json` — `demo` / `prod` trading base URLs.
 - `src/db.py` — `OrderDB`: SQLite `orders` table (`save` upsert, `get`, `by_status`).
 - `src/trade.py` — `Trade(key, secret, url, db)` wrapping alpaca-py; records every action in `db`.
+- `src/strategy.py` — generates MACD crossover signals confirmed by Parabolic SAR; does not execute or risk-gate trades.
+- `src/risk.py` — tracks losses, claims strategy signals atomically, gates entries, and manages strategy protection/reversal closes.
+- `src/strategy.py` — generates MACD crossover signals confirmed by Parabolic SAR; does not execute or risk-gate trades.
 - `src/start.py` — entry point.
 - `.env` — keys, `DEMO`, `STATE`, log settings, `PREFIX`, `DB_PATH` (gitignored).
+- `.env` — keys, `DEMO`, `STATE`, `STRATEGY_SYMBOLS`, log settings, `PREFIX`, `DB_PATH` (gitignored).
 - `data/alpaca.db` — default database location (gitignored).
 - `.venv/` — local virtualenv with `requirements.txt` installed (alpaca-py 0.44.0, Python 3.13).
 
 ## Trade methods
 
-| Method | Behavior |
-|---|---|
-| `sync_orders()` | Re-fetches every `NA`/`SUBMITTED`/`PARTIAL` row from Alpaca and updates status + costs. `NA` rows Alpaca returns 404 for become `SKIPPED`. |
-| `get_balance()` | Dict of currency, cash, equity, buying power, portfolio value. |
-| `place_order(symbol, side, qty=None, notional=None, limit_price=None, time_in_force="day", client_order_id=None, description=None)` | Market order, or limit if `limit_price`. Exactly one of `qty`/`notional`. Tag defaults to `<PREFIX>-<uuid7>`. Saves `NA` before submitting, then the Alpaca status. |
-| `close_order(client_order_id)` | Skips if the row is `CLOSED`. Otherwise cancels unfilled remainder, closes the filled qty at market, and updates the same row: `CLOSED`, new `modified`, description naming qty + closing order id. Nothing filled → `CANCELLED` with a description. |
-| `close_orders()` | Runs `close_order` on every row with this `PREFIX` that is `SUBMITTED`/`PARTIAL`/`FILLED`, or `CANCELLED`/`EXPIRED` with costs > 0. Other prefixes and non-DB positions untouched. One failure is logged and the rest continue. Returns the closing orders. |
-| `cancel_order(client_order_id)` | Cancels one order; records current state (final state arrives on next sync). |
-| `cancel_orders()` | Cancels all open orders, then `sync_orders()`. |
-| `get_asset_data(symbol)` | Asset details + latest bid/ask (stock or crypto data client). |
+| Method                                                                                                                              | Behavior                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sync_orders()`                                                                                                                     | Re-fetches every `NA`/`SUBMITTED`/`PARTIAL` row from Alpaca and updates status + costs. `NA` rows Alpaca returns 404 for become `SKIPPED`.                                                                                                                  |
+| `get_balance()`                                                                                                                     | Dict of currency, cash, equity, buying power, portfolio value.                                                                                                                                                                                              |
+| `place_order(symbol, side, qty=None, notional=None, limit_price=None, time_in_force="day", client_order_id=None, description=None)` | Market order, or limit if `limit_price`. Exactly one of `qty`/`notional`. Tag defaults to `<PREFIX>-<uuid7>`. Saves `NA` before submitting, then the Alpaca status.                                                                                         |
+| `close_order(client_order_id)`                                                                                                      | Skips if the row is `CLOSED`. Otherwise cancels unfilled remainder, closes the filled qty at market, and updates the same row: `CLOSED`, new `modified`, description naming qty + closing order id. Nothing filled → `CANCELLED` with a description.        |
+| `close_orders()`                                                                                                                    | Runs `close_order` on every row with this `PREFIX` that is `SUBMITTED`/`PARTIAL`/`FILLED`, or `CANCELLED`/`EXPIRED` with costs > 0. Other prefixes and non-DB positions untouched. One failure is logged and the rest continue. Returns the closing orders. |
+| `cancel_order(client_order_id)`                                                                                                     | Cancels one order; records current state (final state arrives on next sync).                                                                                                                                                                                |
+| `cancel_orders()`                                                                                                                   | Cancels all open orders, then `sync_orders()`.                                                                                                                                                                                                              |
+| `get_asset_data(symbol)`                                                                                                            | Asset details + latest bid/ask (stock or crypto data client).                                                                                                                                                                                               |
 
 ## Decisions
 

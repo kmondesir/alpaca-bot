@@ -7,8 +7,12 @@ human must review the losses, delete the file, and set STATE back to true.
 
 import json
 import logging
+import sqlite3
+from contextlib import closing
 from typing import Optional
 
+from alpaca.common.exceptions import APIError
+from alpaca.trading.enums import OrderStatus
 from dotenv import set_key
 
 import config
@@ -18,6 +22,294 @@ logger = logging.getLogger(__name__)
 
 LOSS_FILE = config.LOSS_DIRECTORY / "losses.json"
 ENV_FILE = config.ROOT_DIR / ".env"
+
+_STRATEGY_SIGNALS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS strategy_signals (
+    symbol TEXT NOT NULL,
+    signal_timestamp TEXT NOT NULL,
+    client_order_id TEXT NOT NULL UNIQUE,
+    side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+    protected_qty REAL NOT NULL DEFAULT 0,
+    protection_complete INTEGER NOT NULL DEFAULT 0,
+    position_closed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (symbol, signal_timestamp)
+)
+"""
+
+
+def _strategy_connection() -> sqlite3.Connection:
+    config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(config.DB_PATH, timeout=30)
+    try:
+        with connection:
+            connection.execute(_STRATEGY_SIGNALS_SCHEMA)
+            try:
+                connection.execute(
+                    "ALTER TABLE strategy_signals "
+                    "ADD COLUMN position_closed INTEGER NOT NULL DEFAULT 0"
+                )
+            except sqlite3.OperationalError as error:
+                if "duplicate column" not in str(error).lower():
+                    raise
+    except Exception:
+        connection.close()
+        raise
+    return connection
+
+
+def claim_strategy_signal(
+    symbol: str, signal_timestamp: str, client_order_id: str, side: str
+) -> bool:
+    """Atomically claim a crossover so only one run can submit its entry order."""
+    if side not in ("buy", "sell"):
+        raise ValueError("side must be 'buy' or 'sell'")
+    with closing(_strategy_connection()) as connection:
+        with connection:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO strategy_signals
+                    (symbol, signal_timestamp, client_order_id, side)
+                VALUES (?, ?, ?, ?)
+                """,
+                (symbol, signal_timestamp, client_order_id, side),
+            )
+            return cursor.rowcount == 1
+
+
+def pending_strategy_entries() -> list[dict]:
+    """Return claimed entries whose filled quantity still needs protection."""
+    with closing(_strategy_connection()) as connection:
+        with connection:
+            rows = connection.execute(
+                """
+                SELECT client_order_id, symbol, side, protected_qty
+                FROM strategy_signals
+                WHERE protection_complete = 0
+                """
+            ).fetchall()
+    return [
+        {
+            "client_order_id": row[0],
+            "symbol": row[1],
+            "side": row[2],
+            "protected_qty": row[3],
+        }
+        for row in rows
+    ]
+
+
+def strategy_entries_for_symbol(symbol: str) -> list[dict]:
+    """Return strategy entries associated with a symbol, newest first."""
+    with closing(_strategy_connection()) as connection:
+        rows = connection.execute(
+            """
+            SELECT client_order_id, side, position_closed
+            FROM strategy_signals
+            WHERE symbol = ?
+            ORDER BY signal_timestamp DESC
+            """,
+            (symbol,),
+        ).fetchall()
+    return [
+        {"client_order_id": row[0], "side": row[1], "position_closed": bool(row[2])}
+        for row in rows
+    ]
+
+
+def update_strategy_protection(
+    client_order_id: str, protected_qty: float, complete: bool = False
+) -> None:
+    """Record protected fills, retaining the signal claim to prevent re-entry."""
+    with closing(_strategy_connection()) as connection:
+        with connection:
+            connection.execute(
+                """
+                UPDATE strategy_signals
+                SET protected_qty = ?, protection_complete = ?
+                WHERE client_order_id = ?
+                """,
+                (protected_qty, int(complete), client_order_id),
+            )
+
+
+def release_strategy_signal(client_order_id: str) -> None:
+    """Release a claim only when no entry order was recorded locally."""
+    with closing(_strategy_connection()) as connection:
+        with connection:
+            connection.execute(
+                "DELETE FROM strategy_signals WHERE client_order_id = ?",
+                (client_order_id,),
+            )
+
+
+def ignore_strategy_signal(client_order_id: str) -> None:
+    """Keep a signal deduplicated without recording it as an opened position."""
+    with closing(_strategy_connection()) as connection:
+        with connection:
+            connection.execute(
+                """
+                UPDATE strategy_signals
+                SET protection_complete = 1, position_closed = 1
+                WHERE client_order_id = ?
+                """,
+                (client_order_id,),
+            )
+
+
+def mark_strategy_position_closed(symbol: str, entry_side: str) -> None:
+    """Mark the newest active strategy entry closed after an exit fills."""
+    with closing(_strategy_connection()) as connection:
+        with connection:
+            connection.execute(
+                """
+                UPDATE strategy_signals
+                SET position_closed = 1
+                WHERE client_order_id = (
+                    SELECT client_order_id
+                    FROM strategy_signals
+                    WHERE symbol = ? AND side = ? AND position_closed = 0
+                    ORDER BY signal_timestamp DESC
+                    LIMIT 1
+                )
+                """,
+                (symbol, entry_side),
+            )
+
+
+def _protect_pending_strategy_entries(trade) -> None:
+    terminal_statuses = {
+        OrderStatus.FILLED,
+        OrderStatus.CANCELED,
+        OrderStatus.EXPIRED,
+        OrderStatus.REJECTED,
+        OrderStatus.REPLACED,
+    }
+    for entry in pending_strategy_entries():
+        client_order_id = entry["client_order_id"]
+        row = trade.db.get(client_order_id)
+        if row is None or row["status"] == "SKIPPED":
+            release_strategy_signal(client_order_id)
+            continue
+        try:
+            order = trade.client.get_order_by_client_id(client_order_id)
+        except APIError as error:
+            logger.warning("Could not check strategy entry %s: %s", client_order_id, error)
+            continue
+
+        filled_quantity = float(order.filled_qty or 0)
+        protected_quantity = float(entry["protected_qty"])
+        additional_quantity = filled_quantity - protected_quantity
+        average_price = float(order.filled_avg_price or 0)
+        if additional_quantity > 0 and average_price > 0:
+            trade.protect_position(
+                entry["symbol"],
+                additional_quantity,
+                average_price,
+                description=f"strategy protection for {entry['symbol']}",
+                position_side=entry["side"],
+            )
+            update_strategy_protection(client_order_id, filled_quantity)
+            protected_quantity = filled_quantity
+
+        if order.status in terminal_statuses and filled_quantity <= protected_quantity:
+            update_strategy_protection(client_order_id, protected_quantity, complete=True)
+
+
+def process_strategy_signals(trade, signals: list) -> list:
+    """Apply risk gates and execute signals, closing tracked positions on reversals."""
+    try:
+        _protect_pending_strategy_entries(trade)
+    except Exception:
+        logger.exception("Could not reconcile strategy protective orders")
+
+    if not signals:
+        return []
+    if not config.STATE:
+        logger.info("STATE is off; risk manager blocked strategy trades")
+        return []
+    if not trade.is_market_open():
+        logger.info("Market is closed; risk manager skipped new entries")
+        return []
+
+    positions = {position.symbol.upper(): position for position in trade.client.get_all_positions()}
+    submitted_orders = []
+    active_statuses = {"NA", "SUBMITTED", "PARTIAL", "FILLED"}
+
+    for signal in signals:
+        if not config.STATE:
+            logger.info("STATE switched off during risk processing; stopping signal handling")
+            break
+        if not trade.is_market_open():
+            logger.info("Market closed during risk processing; stopping signal handling")
+            break
+        symbol = signal.symbol.upper()
+        client_order_id = config.new_client_order_id()
+        if not claim_strategy_signal(
+            symbol, signal.bar_timestamp.isoformat(), client_order_id, signal.side
+        ):
+            logger.info("Duplicate strategy signal ignored for %s", symbol)
+            continue
+
+        close_attempted = False
+        try:
+            position = positions.get(symbol)
+            if position is not None:
+                position_side = "buy" if str(position.side).lower().endswith("long") else "sell"
+                tracked_entries = [
+                    entry
+                    for entry in strategy_entries_for_symbol(symbol)
+                    if not entry["position_closed"] and entry["side"] == position_side
+                ]
+                if position_side == signal.side:
+                    logger.info("Existing %s position blocks another %s entry for %s", position_side, signal.direction, symbol)
+                    ignore_strategy_signal(client_order_id)
+                    continue
+                if not tracked_entries:
+                    logger.warning("Opposite signal for unmanaged %s position; leaving it untouched", symbol)
+                    ignore_strategy_signal(client_order_id)
+                    continue
+                for entry in tracked_entries:
+                    row = trade.db.get(entry["client_order_id"])
+                    if row is not None and row["status"] in active_statuses:
+                        close_attempted = True
+                        trade.close_order(entry["client_order_id"])
+                ignore_strategy_signal(client_order_id)
+                logger.info("Closed tracked %s position in %s; waiting for a new signal before reversing", position_side, symbol)
+                continue
+
+            pending_entries = [
+                entry
+                for entry in strategy_entries_for_symbol(symbol)
+                if not entry["position_closed"]
+                and (row := trade.db.get(entry["client_order_id"])) is not None
+                and row["status"] in active_statuses
+            ]
+            if pending_entries:
+                logger.info("Existing strategy order blocks another entry for %s", symbol)
+                ignore_strategy_signal(client_order_id)
+                continue
+
+            order = trade.open_position(
+                symbol,
+                side=signal.side,
+                description=(
+                    f"MACD {signal.direction} crossover confirmed by 1m and 5m PSAR "
+                    f"at {signal.bar_timestamp.isoformat()}"
+                ),
+                client_order_id=client_order_id,
+            )
+            submitted_orders.append(order)
+            logger.info("Risk manager submitted %s entry for %s", signal.direction, symbol)
+            _protect_pending_strategy_entries(trade)
+        except Exception:
+            if not close_attempted and trade.db.get(client_order_id) is None:
+                try:
+                    release_strategy_signal(client_order_id)
+                except Exception:
+                    logger.exception("Could not release failed strategy signal for %s", symbol)
+            logger.exception("Risk processing failed for strategy signal on %s", symbol)
+
+    return submitted_orders
 
 
 def _load() -> dict:
@@ -55,3 +347,4 @@ def record_trade(client_order_id: str, pnl: float, symbol: Optional[str] = None)
     if config.MAX_CONSECUTIVE_LOSSES > 0 and streak >= config.MAX_CONSECUTIVE_LOSSES:
         logger.error("%d consecutive losses; switching STATE off in .env", streak)
         set_key(str(ENV_FILE), "STATE", "false")
+        config.STATE = False

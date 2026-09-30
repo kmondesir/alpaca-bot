@@ -32,6 +32,11 @@ DEMO = os.getenv("DEMO", "true").lower() == "true"
 BASE_URL = os.getenv("ALPACA_BASE_URL", "")
 # Kill switch: the script only runs when STATE=true.
 STATE = os.getenv("STATE", "false").lower() == "true"
+STRATEGY_SYMBOLS = tuple(
+    symbol.strip().upper()
+    for symbol in os.getenv("STRATEGY_SYMBOLS", "").split(",")
+    if symbol.strip()
+)
 
 # client_order_id is "<PREFIX>-<uuid7>"; Alpaca allows at most 128 characters.
 PREFIX = os.getenv("PREFIX", "alpaca")
@@ -50,6 +55,7 @@ TAKE_PROFIT = float(os.getenv("TAKE_PROFIT", "0.5"))
 TRAILING_STOP_LOSS = float(os.getenv("TRAILING_STOP_LOSS", "0.05"))
 # MAX_CONSECUTIVE_LOSSES: after this many losing trades in a row, STATE is switched off.
 MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSS", "5"))
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
 
 # Relative LOSS_DIRECTORY paths resolve from the project root.
 LOSS_DIRECTORY = ROOT_DIR / os.getenv("LOSS_DIRECTORY", "status")
