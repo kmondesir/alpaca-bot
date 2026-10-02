@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import sys
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -122,9 +123,15 @@ def main(argv: Optional[list[str]] = None) -> None:
     if args.command is None and not config.STATE:
         logger.info("STATE is off; exiting without running")
         return
-    if not (config.ALPACA_API_KEY and config.ALPACA_SECRET_KEY):
-        logger.error("ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in .env")
-        return
+    required = {
+        "ALPACA_API_KEY": config.ALPACA_API_KEY,
+        "ALPACA_SECRET_KEY": config.ALPACA_SECRET_KEY,
+        "ALPACA_BASE_URL": config.BASE_URL,
+    }
+    missing = [name for name, value in required.items() if not value.strip()]
+    if missing:
+        logger.error("Missing required .env variables: %s; exiting", ", ".join(missing))
+        sys.exit(1)
     logger.info("Starting alpaca (demo=%s, url=%s)", config.DEMO, config.BASE_URL)
 
     db = OrderDB()
