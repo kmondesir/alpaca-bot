@@ -12,6 +12,7 @@ import config
 import risk
 from db import OrderDB
 from strategy import MacdPsarStrategy, Signal
+from symbols import normalize_symbol
 from trade import Trade
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ def _print_result(value) -> None:
 
 def _manual_signal(symbol: str, side: str) -> Signal:
     direction = "long" if side == "buy" else "short"
-    return Signal(symbol.upper(), direction, datetime.now(timezone.utc))
+    return Signal(normalize_symbol(symbol), direction, datetime.now(timezone.utc))
 
 
 def _get_open_position(trade: Trade, symbol: str):
@@ -67,11 +68,11 @@ def _run_command(args, trade: Trade, db: OrderDB) -> None:
     if args.command == "get_balance":
         _print_result(trade.get_balance())
     elif args.command in ("asset", "get_asset_data"):
-        _print_result(trade.get_asset_data(args.symbol.upper()))
+        _print_result(trade.get_asset_data(normalize_symbol(args.symbol)))
     elif args.command == "get_positions":
         _print_result(trade.client.get_all_positions())
     elif args.command == "get_position":
-        symbol = args.symbol.upper()
+        symbol = normalize_symbol(args.symbol)
         position = _get_open_position(trade, symbol)
         _print_result(position if position is not None else {"symbol": symbol, "status": "not_open"})
     elif args.command in ("get_market_status", "market_status"):
@@ -81,7 +82,7 @@ def _run_command(args, trade: Trade, db: OrderDB) -> None:
         orders = risk.process_strategy_signals(trade, [_manual_signal(args.symbol, args.side)])
         _print_result(orders)
     elif args.command == "close_position":
-        symbol = args.symbol.upper()
+        symbol = normalize_symbol(args.symbol)
         position = _get_open_position(trade, symbol)
         if position is None:
             _print_result({"symbol": symbol, "status": "not_open"})
@@ -130,7 +131,12 @@ def main(argv: Optional[list[str]] = None) -> None:
     trade = Trade(config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY, config.BASE_URL, db)
     if args.command is None:
         trade.sync_orders()
-        signals = MacdPsarStrategy(trade.stock_data, (args.asset.upper(),)).generate_signals()
+        asset = normalize_symbol(args.asset)
+        signals = MacdPsarStrategy(
+            trade.stock_data,
+            (asset,),
+            crypto_data_client=trade.crypto_data,
+        ).generate_signals()
         risk.process_strategy_signals(trade, signals)
     else:
         _run_command(args, trade, db)

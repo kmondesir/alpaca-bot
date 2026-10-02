@@ -17,6 +17,7 @@ from alpaca.trading.requests import GetOrdersRequest
 from dotenv import set_key
 
 import config
+from symbols import is_crypto_symbol, normalize_symbol
 from db import utc_now
 
 logger = logging.getLogger(__name__)
@@ -244,12 +245,15 @@ def _loss_limit_reached() -> bool:
 
 
 def _occupied_symbols(trade) -> tuple[dict, set[str]]:
-    positions = {position.symbol.upper(): position for position in trade.client.get_all_positions()}
+    positions = {
+        normalize_symbol(position.symbol): position
+        for position in trade.client.get_all_positions()
+    }
     pending_orders = trade.client.get_orders(
         filter=GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=500)
     )
     occupied_symbols = set(positions)
-    occupied_symbols.update(order.symbol.upper() for order in pending_orders)
+    occupied_symbols.update(normalize_symbol(order.symbol) for order in pending_orders)
     return positions, occupied_symbols
 
 
@@ -267,10 +271,6 @@ def process_strategy_signals(trade, signals: list) -> list:
         return []
     if _loss_limit_reached():
         return []
-    if not trade.is_market_open():
-        logger.info("Market is closed; risk manager skipped new entries")
-        return []
-
     positions, occupied_symbols = _occupied_symbols(trade)
     submitted_orders = []
     active_statuses = {"NA", "SUBMITTED", "PARTIAL", "FILLED", "OPEN", "CLOSING"}
@@ -281,10 +281,10 @@ def process_strategy_signals(trade, signals: list) -> list:
             break
         if _loss_limit_reached():
             break
-        if not trade.is_market_open():
-            logger.info("Market closed during risk processing; stopping signal handling")
-            break
-        symbol = signal.symbol.upper()
+        symbol = normalize_symbol(signal.symbol)
+        if not trade.is_market_open(symbol):
+            logger.info("Market closed for %s; risk manager skipped signal", symbol)
+            continue
         client_order_id = config.new_client_order_id()
         if not claim_strategy_signal(
             symbol, signal.bar_timestamp.isoformat(), client_order_id, signal.side
@@ -319,6 +319,11 @@ def process_strategy_signals(trade, signals: list) -> list:
                 logger.info("Closed tracked %s position in %s; waiting for a new signal before reversing", position_side, symbol)
                 continue
 
+            if is_crypto_symbol(symbol) and signal.side == "sell":
+                logger.info("Ignoring short signal for crypto %s; crypto short selling is unsupported", symbol)
+                ignore_strategy_signal(client_order_id)
+                continue
+
             pending_entries = [
                 entry
                 for entry in strategy_entries_for_symbol(symbol)
@@ -341,7 +346,11 @@ def process_strategy_signals(trade, signals: list) -> list:
                 ignore_strategy_signal(client_order_id)
                 continue
 
-            notional = trade.get_balance()["buying_power"] * config.WAGER
+            balance = trade.get_balance()
+            buying_power_key = (
+                "non_marginable_buying_power" if is_crypto_symbol(symbol) else "buying_power"
+            )
+            notional = balance.get(buying_power_key, 0.0) * config.WAGER
             if notional <= 0:
                 logger.warning("Calculated wager is not positive; blocking %s", symbol)
                 ignore_strategy_signal(client_order_id)

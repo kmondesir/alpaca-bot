@@ -139,10 +139,13 @@ python src/start.py open_position AAPL --side buy
 python src/start.py close_position AAPL
 ```
 
-For the scheduled strategy, pass the required asset without a subcommand:
+For the scheduled strategy, pass the required asset without a subcommand. Stocks
+use Alpaca's IEX feed; crypto pairs use crypto bars. `BTC` is accepted as an
+alias for `BTC/USD`:
 
 ```bash
 python src/start.py --asset SPY
+python src/start.py --asset BTC/USD
 ```
 
 `open_position` submits a market order sized by risk using `WAGER` from `.env`.
@@ -155,9 +158,12 @@ the scheduled strategy requires the `--asset` argument.
 The selected `--asset` is used for this run. The strategy checks closed 15-minute
 MACD (12/26/9) bars for bullish crosses below zero or bearish crosses above
 zero, confirmed by Parabolic SAR on both 1-minute and 5-minute bars. It only
-returns signals; `start.py` sends them to `risk.py`, which requires `STATE=true`
-and an open Alpaca market, prevents duplicate entries, applies `WAGER`, and
-handles protective exits and tracked reversals.
+returns signals; `start.py` sends them to `risk.py`, which requires `STATE=true`,
+prevents duplicate entries, applies `WAGER`, and handles protective exits and
+tracked reversals. Crypto runs 24/7, is long-only, and uses GTC orders. The
+configured `TRAILING_STOP_LOSS` fraction becomes a fixed stop-limit for crypto;
+crypto position sizing uses non-marginable buying power. As with all stop-limit
+orders, a fast price gap can prevent execution.
 
 Set `STATE=true` in `.env` and provide an asset, then:
 

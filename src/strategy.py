@@ -6,8 +6,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from alpaca.common.enums import Sort
-from alpaca.data.requests import StockBarsRequest
+from alpaca.data.enums import DataFeed
+from alpaca.data.requests import CryptoBarsRequest, StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
+from symbols import is_crypto_symbol, normalize_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -124,14 +127,17 @@ def _signal_from_bars(
 
 
 class MacdPsarStrategy:
-    def __init__(self, data_client, symbols: tuple[str, ...]):
+    def __init__(self, data_client, symbols: tuple[str, ...], crypto_data_client=None):
         self.data_client = data_client
-        self.symbols = tuple(dict.fromkeys(symbol.strip().upper() for symbol in symbols if symbol.strip()))
+        self.crypto_data_client = crypto_data_client
+        self.symbols = tuple(dict.fromkeys(normalize_symbol(symbol) for symbol in symbols if symbol.strip()))
 
     def _closed_bars(self, symbol: str, minutes: int) -> list:
         now = datetime.now(timezone.utc)
-        response = self.data_client.get_stock_bars(
-            StockBarsRequest(
+        if is_crypto_symbol(symbol):
+            if self.crypto_data_client is None:
+                raise RuntimeError("A crypto data client is required for crypto symbols")
+            request = CryptoBarsRequest(
                 symbol_or_symbols=symbol,
                 timeframe=TimeFrame(minutes, TimeFrameUnit.Minute),
                 start=now - timedelta(days=14),
@@ -139,9 +145,24 @@ class MacdPsarStrategy:
                 limit=_BAR_LIMIT,
                 sort=Sort.DESC,
             )
-        )
+            response = self.crypto_data_client.get_crypto_bars(request)
+        else:
+            request = StockBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=TimeFrame(minutes, TimeFrameUnit.Minute),
+                start=now - timedelta(days=14),
+                end=now,
+                limit=_BAR_LIMIT,
+                sort=Sort.DESC,
+                feed=DataFeed.IEX,
+            )
+            response = self.data_client.get_stock_bars(request)
         data = response.data if hasattr(response, "data") else response
-        bars = list(reversed(data.get(symbol, [])))
+        bars = next(
+            (values for key, values in data.items() if normalize_symbol(key) == normalize_symbol(symbol)),
+            [],
+        )
+        bars = list(reversed(bars))
         return [bar for bar in bars if bar.timestamp + timedelta(minutes=minutes) <= now]
 
     def evaluate(self, symbol: str) -> Signal | None:

@@ -6,6 +6,7 @@ so later cron runs can reconcile their status.
 
 import logging
 import math
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from alpaca.common.exceptions import APIError
@@ -22,12 +23,14 @@ from alpaca.trading.requests import (
     ClosePositionRequest,
     LimitOrderRequest,
     MarketOrderRequest,
+    StopLimitOrderRequest,
     TrailingStopOrderRequest,
 )
 
 import config
 import risk
 from db import PENDING_STATUSES, OrderDB
+from symbols import is_crypto_symbol, normalize_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,11 @@ def _db_status(order) -> str:
     if order.status in (OrderStatus.CANCELED, OrderStatus.REJECTED, OrderStatus.REPLACED):
         return "CANCELLED"
     return "PARTIAL" if _filled(order) > 0 else "SUBMITTED"
+
+
+def _round_to_increment(price: float, increment: float) -> float:
+    tick = Decimal(str(increment))
+    return float((Decimal(str(price)) / tick).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * tick)
 
 
 class Trade:
@@ -250,16 +258,24 @@ class Trade:
     def get_balance(self) -> dict:
         """Return the account's cash, equity and buying power."""
         account = self.client.get_account()
+        non_marginable_buying_power = getattr(account, "non_marginable_buying_power", None)
         return {
             "currency": account.currency,
             "cash": float(account.cash),
             "equity": float(account.equity),
             "buying_power": float(account.buying_power),
+            "non_marginable_buying_power": (
+                float(non_marginable_buying_power)
+                if non_marginable_buying_power is not None
+                else 0.0
+            ),
             "portfolio_value": float(account.portfolio_value),
         }
 
-    def is_market_open(self) -> bool:
+    def is_market_open(self, symbol: Optional[str] = None) -> bool:
         """Return whether the market is open, including holiday and early-close schedules."""
+        if symbol is not None and is_crypto_symbol(symbol):
+            return True
         return self.client.get_clock().is_open
 
     def place_order(
@@ -269,6 +285,7 @@ class Trade:
         qty: Optional[float] = None,
         notional: Optional[float] = None,
         limit_price: Optional[float] = None,
+        stop_price: Optional[float] = None,
         trail_percent: Optional[float] = None,
         time_in_force: str = "day",
         client_order_id: Optional[str] = None,
@@ -288,8 +305,13 @@ class Trade:
         """
         if (qty is None) == (notional is None):
             raise ValueError("Pass exactly one of qty or notional")
-        if limit_price is not None and trail_percent is not None:
-            raise ValueError("Pass at most one of limit_price or trail_percent")
+        symbol = normalize_symbol(symbol)
+        if trail_percent is not None and (limit_price is not None or stop_price is not None):
+            raise ValueError("A trailing stop cannot include limit_price or stop_price")
+        if stop_price is not None and limit_price is None:
+            raise ValueError("stop_price requires limit_price for a stop-limit order")
+        if is_crypto_symbol(symbol) and time_in_force.lower() not in ("gtc", "ioc"):
+            raise ValueError("Crypto orders require time_in_force='gtc' or 'ioc'")
         if (parent_id is None) != (child_role is None):
             raise ValueError("parent_id and child_role must be provided together")
         order_side = OrderSide(side.lower())
@@ -303,7 +325,14 @@ class Trade:
             time_in_force=TimeInForce(time_in_force.lower()),
             client_order_id=client_order_id,
         )
-        if trail_percent is None:
+        if stop_price is not None:
+            order_type = "stop_limit"
+            request = StopLimitOrderRequest(
+                **params,
+                stop_price=stop_price,
+                limit_price=limit_price,
+            )
+        elif trail_percent is None:
             if limit_price is None:
                 order_type = "market"
                 request = MarketOrderRequest(**params)
@@ -328,13 +357,18 @@ class Trade:
         symbol: str,
         notional: float,
         side: str = "buy",
-        time_in_force: str = "day",
+        time_in_force: Optional[str] = None,
         description: Optional[str] = None,
         client_order_id: Optional[str] = None,
     ):
         """Submit a market entry using the notional approved by the risk module."""
+        symbol = normalize_symbol(symbol)
+        crypto = is_crypto_symbol(symbol)
+        time_in_force = time_in_force or ("gtc" if crypto else "day")
         if notional <= 0:
             raise ValueError("notional must be positive")
+        if crypto and side.lower() == OrderSide.SELL.value:
+            raise RuntimeError("Crypto short selling is unsupported")
         if side.lower() == OrderSide.SELL.value:
             asset = self.get_asset_data(symbol)
             if not asset["shortable"]:
@@ -381,9 +415,13 @@ class Trade:
         with None for any disabled exit.
         """
         basis = qty * avg_price
+        symbol = normalize_symbol(symbol)
+        crypto = is_crypto_symbol(symbol)
         entry_side = OrderSide(position_side.lower())
         if entry_side not in (OrderSide.BUY, OrderSide.SELL):
             raise ValueError("position_side must be 'buy' or 'sell'")
+        if crypto and entry_side != OrderSide.BUY:
+            raise ValueError("Crypto protective orders only support long positions")
         if self.db.get_parent(parent_id) is None:
             raise KeyError(f"No parent position found for {parent_id!r}")
         exit_side = OrderSide.SELL if entry_side == OrderSide.BUY else OrderSide.BUY
@@ -391,11 +429,17 @@ class Trade:
         trailing_stop = None
         take_profit_id = None
         trailing_stop_id = None
+        price_increment = 0.01
+        if crypto:
+            asset = self.client.get_asset(symbol)
+            price_increment = float(asset.price_increment or 0.01)
+            if price_increment <= 0:
+                raise ValueError(f"Invalid price increment for {symbol}")
 
         if config.TAKE_PROFIT > 0:
             take_profit_id = config.new_client_order_id()
             multiplier = 1 + config.TAKE_PROFIT if entry_side == OrderSide.BUY else 1 - config.TAKE_PROFIT
-            take_profit_price = round(avg_price * multiplier, 2)
+            take_profit_price = _round_to_increment(avg_price * multiplier, price_increment)
             if take_profit_price <= 0:
                 raise ValueError("TAKE_PROFIT must be less than 1 for a short position")
             take_profit = self.place_order(
@@ -403,6 +447,7 @@ class Trade:
                 exit_side.value,
                 qty=qty,
                 limit_price=take_profit_price,
+                time_in_force="gtc" if crypto else "day",
                 client_order_id=take_profit_id,
                 description=description or f"take-profit for {symbol}",
                 parent_id=parent_id,
@@ -410,16 +455,38 @@ class Trade:
             )
         if config.TRAILING_STOP_LOSS > 0:
             trailing_stop_id = config.new_client_order_id()
-            trailing_stop = self.place_order(
-                symbol,
-                exit_side.value,
-                qty=qty,
-                trail_percent=config.TRAILING_STOP_LOSS * 100,
-                client_order_id=trailing_stop_id,
-                description=description or f"trailing-stop for {symbol}",
-                parent_id=parent_id,
-                child_role="trailing_stop",
-            )
+            if crypto:
+                if config.TRAILING_STOP_LOSS >= 1:
+                    raise ValueError("TRAILING_STOP_LOSS must be less than 1 for crypto")
+                stop_price = _round_to_increment(
+                    avg_price * (1 - config.TRAILING_STOP_LOSS), price_increment
+                )
+                limit_price = _round_to_increment(stop_price - price_increment, price_increment)
+                if stop_price <= 0 or limit_price <= 0:
+                    raise ValueError("Crypto stop-limit prices must be positive")
+                trailing_stop = self.place_order(
+                    symbol,
+                    exit_side.value,
+                    qty=qty,
+                    limit_price=limit_price,
+                    stop_price=stop_price,
+                    time_in_force="gtc",
+                    client_order_id=trailing_stop_id,
+                    description=description or f"fixed stop-limit for {symbol}",
+                    parent_id=parent_id,
+                    child_role="trailing_stop",
+                )
+            else:
+                trailing_stop = self.place_order(
+                    symbol,
+                    exit_side.value,
+                    qty=qty,
+                    trail_percent=config.TRAILING_STOP_LOSS * 100,
+                    client_order_id=trailing_stop_id,
+                    description=description or f"trailing-stop for {symbol}",
+                    parent_id=parent_id,
+                    child_role="trailing_stop",
+                )
 
         if take_profit_id and trailing_stop_id:
             self.db.link_children(take_profit_id, trailing_stop_id, basis)
@@ -534,6 +601,7 @@ class Trade:
 
     def get_asset_data(self, symbol: str) -> dict:
         """Return asset details plus the latest bid/ask quote."""
+        symbol = normalize_symbol(symbol)
         asset = self.client.get_asset(symbol)
         if asset.asset_class == AssetClass.CRYPTO:
             quotes = self.crypto_data.get_crypto_latest_quote(
