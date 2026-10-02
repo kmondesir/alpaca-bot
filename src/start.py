@@ -132,11 +132,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     if args.command is None:
         trade.sync_orders()
         asset = normalize_symbol(args.asset)
-        signals = MacdPsarStrategy(
-            trade.stock_data,
-            (asset,),
-            crypto_data_client=trade.crypto_data,
-        ).generate_signals()
+        signals = MacdPsarStrategy(trade.stock_data, (asset,)).generate_signals()
         if not signals:
             logger.info("No strategy signal for %s this run", asset)
         risk.process_strategy_signals(trade, signals)
