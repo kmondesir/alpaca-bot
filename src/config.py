@@ -32,11 +32,6 @@ DEMO = os.getenv("DEMO", "true").lower() == "true"
 BASE_URL = os.getenv("ALPACA_BASE_URL", "")
 # Kill switch: the script only runs when STATE=true.
 STATE = os.getenv("STATE", "false").lower() == "true"
-STRATEGY_SYMBOLS = tuple(
-    symbol.strip().upper()
-    for symbol in os.getenv("STRATEGY_SYMBOLS", "").split(",")
-    if symbol.strip()
-)
 
 # client_order_id is "<PREFIX>-<uuid7>"; Alpaca allows at most 128 characters.
 PREFIX = os.getenv("PREFIX", "alpaca")

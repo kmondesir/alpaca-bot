@@ -12,7 +12,8 @@ from contextlib import closing
 from typing import Optional
 
 from alpaca.common.exceptions import APIError
-from alpaca.trading.enums import OrderStatus
+from alpaca.trading.enums import OrderStatus, QueryOrderStatus
+from alpaca.trading.requests import GetOrdersRequest
 from dotenv import set_key
 
 import config
@@ -216,6 +217,42 @@ def _protect_pending_strategy_entries(trade) -> None:
             update_strategy_protection(client_order_id, protected_quantity, complete=True)
 
 
+def _loss_limit_reached() -> bool:
+    limit = config.MAX_CONSECUTIVE_LOSSES
+    if limit <= 0:
+        return False
+    try:
+        data = json.loads(LOSS_FILE.read_text(encoding="utf-8")) if LOSS_FILE.exists() else {}
+        consecutive_losses = data.get("consecutive_losses", 0)
+        if not isinstance(consecutive_losses, int) or consecutive_losses < 0:
+            raise ValueError("consecutive_losses must be a non-negative integer")
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        logger.error("Could not read consecutive-loss state; blocking new entries: %s", error)
+        return True
+
+    if consecutive_losses < limit:
+        return False
+    if config.STATE:
+        set_key(str(ENV_FILE), "STATE", "false")
+    config.STATE = False
+    logger.warning(
+        "Consecutive-loss limit reached (%d/%d); blocking new entries",
+        consecutive_losses,
+        limit,
+    )
+    return True
+
+
+def _occupied_symbols(trade) -> tuple[dict, set[str]]:
+    positions = {position.symbol.upper(): position for position in trade.client.get_all_positions()}
+    pending_orders = trade.client.get_orders(
+        filter=GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=500)
+    )
+    occupied_symbols = set(positions)
+    occupied_symbols.update(order.symbol.upper() for order in pending_orders)
+    return positions, occupied_symbols
+
+
 def process_strategy_signals(trade, signals: list) -> list:
     """Apply risk gates and execute signals, closing tracked positions on reversals."""
     try:
@@ -228,17 +265,21 @@ def process_strategy_signals(trade, signals: list) -> list:
     if not config.STATE:
         logger.info("STATE is off; risk manager blocked strategy trades")
         return []
+    if _loss_limit_reached():
+        return []
     if not trade.is_market_open():
         logger.info("Market is closed; risk manager skipped new entries")
         return []
 
-    positions = {position.symbol.upper(): position for position in trade.client.get_all_positions()}
+    positions, occupied_symbols = _occupied_symbols(trade)
     submitted_orders = []
     active_statuses = {"NA", "SUBMITTED", "PARTIAL", "FILLED", "OPEN", "CLOSING"}
 
     for signal in signals:
         if not config.STATE:
             logger.info("STATE switched off during risk processing; stopping signal handling")
+            break
+        if _loss_limit_reached():
             break
         if not trade.is_market_open():
             logger.info("Market closed during risk processing; stopping signal handling")
@@ -290,9 +331,26 @@ def process_strategy_signals(trade, signals: list) -> list:
                 ignore_strategy_signal(client_order_id)
                 continue
 
+            if symbol not in occupied_symbols and len(occupied_symbols) >= config.MAX_OPEN_POSITIONS:
+                logger.warning(
+                    "Maximum open positions reached (%d/%d); blocking %s",
+                    len(occupied_symbols),
+                    config.MAX_OPEN_POSITIONS,
+                    symbol,
+                )
+                ignore_strategy_signal(client_order_id)
+                continue
+
+            notional = trade.get_balance()["buying_power"] * config.WAGER
+            if notional <= 0:
+                logger.warning("Calculated wager is not positive; blocking %s", symbol)
+                ignore_strategy_signal(client_order_id)
+                continue
+
             order = trade.open_position(
                 symbol,
                 side=signal.side,
+                notional=notional,
                 description=(
                     f"MACD {signal.direction} crossover confirmed by 1m and 5m PSAR "
                     f"at {signal.bar_timestamp.isoformat()}"
@@ -300,6 +358,7 @@ def process_strategy_signals(trade, signals: list) -> list:
                 client_order_id=client_order_id,
             )
             submitted_orders.append(order)
+            occupied_symbols.add(symbol)
             logger.info("Risk manager submitted %s entry for %s", signal.direction, symbol)
             _protect_pending_strategy_entries(trade)
         except Exception:

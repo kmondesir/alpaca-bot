@@ -16,12 +16,10 @@ from alpaca.trading.enums import (
     AssetClass,
     OrderSide,
     OrderStatus,
-    QueryOrderStatus,
     TimeInForce,
 )
 from alpaca.trading.requests import (
     ClosePositionRequest,
-    GetOrdersRequest,
     LimitOrderRequest,
     MarketOrderRequest,
     TrailingStopOrderRequest,
@@ -75,6 +73,15 @@ class Trade:
     def _record_parent(self, order, description: Optional[str] = None) -> str:
         """Save the Alpaca state for an entry order and its parent position."""
         status = _db_status(order)
+        if self.db.get_parent(order.client_order_id) is None:
+            self.db.create_parent(
+                order.client_order_id,
+                order.symbol,
+                description,
+                order.side.value,
+                float(order.qty) if order.qty is not None else None,
+                order.order_type.value,
+            )
         self.db.save_parent_entry(
             order.client_order_id,
             status,
@@ -86,12 +93,31 @@ class Trade:
         )
         return status
 
-    def _record_child(self, order, description: Optional[str] = None) -> str:
+    def _record_child(
+        self,
+        order,
+        description: Optional[str] = None,
+        parent_id: Optional[str] = None,
+        child_role: Optional[str] = None,
+    ) -> str:
         """Save the Alpaca state for a protective child order."""
         status = _db_status(order)
         row = self.db.get_child(order.client_order_id)
         if row is None:
-            raise KeyError(f"No child order found for {order.client_order_id!r}")
+            if parent_id is None or child_role is None:
+                raise KeyError(f"No child order found for {order.client_order_id!r}")
+            self.db.create_child(
+                order.client_order_id,
+                parent_id,
+                child_role,
+                description,
+                order.side.value,
+                float(order.qty) if order.qty is not None else None,
+                order.order_type.value,
+            )
+            row = self.db.get_child(order.client_order_id)
+        if row is None:
+            raise KeyError(f"Could not create child order {order.client_order_id!r}")
         self.db.save_child_order(
             order.client_order_id,
             status,
@@ -236,24 +262,6 @@ class Trade:
         """Return whether the market is open, including holiday and early-close schedules."""
         return self.client.get_clock().is_open
 
-    def _check_position_limit(self, symbol: str) -> None:
-        """Reject a new symbol when open positions and pending orders fill the cap."""
-        positions = self.client.get_all_positions()
-        pending_orders = self.client.get_orders(
-            filter=GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=500)
-        )
-        occupied_symbols = {position.symbol.upper() for position in positions}
-        occupied_symbols.update(order.symbol.upper() for order in pending_orders)
-        if symbol.upper() in occupied_symbols:
-            return
-        if len(occupied_symbols) >= config.MAX_OPEN_POSITIONS:
-            message = (
-                f"Maximum open positions reached ({len(occupied_symbols)}/"
-                f"{config.MAX_OPEN_POSITIONS}); cannot open {symbol}"
-            )
-            logger.warning(message)
-            raise RuntimeError(message)
-
     def place_order(
         self,
         symbol: str,
@@ -285,7 +293,6 @@ class Trade:
         if (parent_id is None) != (child_role is None):
             raise ValueError("parent_id and child_role must be provided together")
         order_side = OrderSide(side.lower())
-        self._check_position_limit(symbol)
         client_order_id = client_order_id or config.new_client_order_id()
 
         params = dict(
@@ -308,44 +315,26 @@ class Trade:
             request = TrailingStopOrderRequest(**params, trail_percent=trail_percent)
 
         # Record first: if the submit times out after reaching Alpaca, the
-        # next sync_orders() still finds the order under this tag.
-        if parent_id is None:
-            self.db.create_parent(
-                client_order_id, symbol, description, order_side.value, qty, order_type
-            )
-        else:
-            self.db.create_child(
-                client_order_id,
-                parent_id,
-                child_role,
-                description,
-                order_side.value,
-                qty,
-                order_type,
-            )
         order = self.client.submit_order(order_data=request)
         if parent_id is None:
-            self._record_parent(order)
+            self._record_parent(order, description)
         else:
-            self._record_child(order)
+            self._record_child(order, description, parent_id, child_role)
         logger.info("Placed %s %s %s (%s)", side, qty or notional, symbol, client_order_id)
         return order
 
     def open_position(
         self,
         symbol: str,
+        notional: float,
         side: str = "buy",
-        limit_price: Optional[float] = None,
         time_in_force: str = "day",
         description: Optional[str] = None,
         client_order_id: Optional[str] = None,
     ):
-        """Place an entry order sized as a fraction (config.WAGER) of buying power.
-
-        Sizing dynamically adjusts to the account balance, so wins and losses
-        change the notional of the next trade.
-        """
-        notional = self.get_balance()["buying_power"] * config.WAGER
+        """Submit a market entry using the notional approved by the risk module."""
+        if notional <= 0:
+            raise ValueError("notional must be positive")
         if side.lower() == OrderSide.SELL.value:
             asset = self.get_asset_data(symbol)
             if not asset["shortable"]:
@@ -369,7 +358,6 @@ class Trade:
             symbol,
             side,
             notional=notional,
-            limit_price=limit_price,
             time_in_force=time_in_force,
             client_order_id=client_order_id,
             description=description,

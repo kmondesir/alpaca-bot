@@ -22,7 +22,6 @@ ALPACA_API_KEY=
 ALPACA_SECRET_KEY=
 DEMO=true
 STATE=false
-STRATEGY_SYMBOLS=
 
 LOG_DIRECTORY=logs
 LOG_NAME=alpaca.log
@@ -48,7 +47,6 @@ LOSS_DIRECTORY=status
 | `ALPACA_BASE_URL`      | _(empty)_        | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`.         |
 | `DEMO`                 | `true`           | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                                |
 | `STATE`                | `false`          | Kill switch. The script only runs when `true`; otherwise it logs a message and exits.                                           |
-| `STRATEGY_SYMBOLS`     | _(empty)_        | Comma-separated stock symbols for MACD/Parabolic SAR signals, e.g. `SPY,AAPL`. Empty disables strategy entries.                 |
 | `LOG_DIRECTORY`        | `logs`           | Folder for log files, relative to the project root. Created if missing.                                                         |
 | `LOG_NAME`             | `alpaca.log`     | Log file name.                                                                                                                  |
 | `MAX_SIZE_IN_MB`       | `10`             | Size at which the log file rotates. Decimals allowed.                                                                           |
@@ -126,26 +124,50 @@ migrated.
 
 ## Run
 
+### CLI commands
+
+Pass a command after `src/start.py` to inspect account state or perform a
+risk-gated action:
+
+```bash
+python src/start.py get_balance
+python src/start.py asset AAPL
+python src/start.py get_positions
+python src/start.py get_position AAPL
+python src/start.py get_market_status
+python src/start.py open_position AAPL --side buy
+python src/start.py close_position AAPL
+```
+
+For the scheduled strategy, pass the required asset without a subcommand:
+
+```bash
+python src/start.py --asset SPY
+```
+
+`open_position` submits a market order sized by risk using `WAGER` from `.env`.
+`close_position` closes a tracked position. Both require `STATE=true` and an
+open market; the read-only commands do not require `STATE`. With no subcommand,
+the scheduled strategy requires the `--asset` argument.
+
 ### Strategy
 
-Set `STRATEGY_SYMBOLS` to a comma-separated list of stocks (for example,
-`SPY,AAPL`) to enable signal generation. The strategy checks closed 15-minute
+The selected `--asset` is used for this run. The strategy checks closed 15-minute
 MACD (12/26/9) bars for bullish crosses below zero or bearish crosses above
 zero, confirmed by Parabolic SAR on both 1-minute and 5-minute bars. It only
 returns signals; `start.py` sends them to `risk.py`, which requires `STATE=true`
 and an open Alpaca market, prevents duplicate entries, applies `WAGER`, and
-handles protective exits and tracked reversals. An empty symbol list creates
-no signals.
+handles protective exits and tracked reversals.
 
-Set `STATE=true` in `.env`, then:
+Set `STATE=true` in `.env` and provide an asset, then:
 
 ```bash
-python src/start.py
+python src/start.py --asset SPY
 ```
 
 The script runs once and exits; it does not poll. In production it is run
 every 60 seconds by a cron job, for example:
 
 ```cron
-* * * * * cd /path/to/alpaca && .venv/bin/python src/start.py
+* * * * * cd /path/to/alpaca && .venv/bin/python src/start.py --asset SPY
 ```

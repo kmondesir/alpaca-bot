@@ -13,12 +13,13 @@ real Alpaca account; checks use mocked clients or no network. `start.py` checks
 
 ## Execution model
 
-`start.py` runs once per cron tick and exits. Entry and protective order state
-lives in `parent` and `child` tables; deduplicated signal claims live in the
-risk-owned `strategy_signals` table. Do not add polling loops.
+`start.py` runs once per cron tick and exits. Scheduled runs require one
+`--asset`; entry and protective order state lives in `parent` and `child`
+tables, and deduplicated signal claims live in risk-owned `strategy_signals`.
+Do not add polling loops.
 
-Each run: `STATE` check → key check → `Trade.sync_orders()` → signal generation
-→ risk state/market gates → order, close, and protection handling.
+Each run: parse required `--asset` → `STATE`/key checks → `Trade.sync_orders()`
+→ signal generation for that asset → risk gates and execution.
 
 ## Files
 
@@ -28,24 +29,24 @@ Each run: `STATE` check → key check → `Trade.sync_orders()` → signal gener
 - `src/risk.py` — tracks losses, atomically claims signals, gates trades, and handles reversals/protection.
 - `src/strategy.py` — generates MACD crossover signals confirmed by Parabolic SAR; it does not execute trades.
 - `src/trade.py` — Alpaca trading/data wrapper; records entries on parents and protective exits on children.
-- `src/start.py` — checks `STATE` and credentials, syncs orders, then passes signals to risk.
-- `.env` — credentials, `STATE`, `STRATEGY_SYMBOLS`, and risk/log settings; gitignored.
+- `src/start.py` — checks `--asset`, `STATE`, and credentials, syncs orders, then routes that asset's signals through risk.
+- `.env` — credentials, `STATE`, wager/risk, and logging settings; gitignored.
 - `data/alpaca.db` — default SQLite database location; gitignored.
 - `.venv/` — project virtual environment.
 
 ## Trade methods
 
-| Method                   | Behavior                                                                                                          |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `sync_orders()`          | Refreshes pending parent entries, protective children, and parent close orders.                                   |
-| `get_balance()`          | Returns account cash, equity, buying power, and portfolio value.                                                  |
-| `place_order(...)`       | Creates a parent entry by default; supplying a parent and protective role creates a child. Records before submit. |
-| `open_position(...)`     | Sizes a long or short entry using `WAGER`.                                                                        |
-| `protect_position(...)`  | Creates linked take-profit and trailing-stop children for a parent.                                               |
-| `close_order(parent_id)` | Stores the close order ID, status, quantity, and costs on the parent.                                             |
-| `close_orders()`         | Closes eligible parent positions tagged with this `PREFIX`.                                                       |
-| `cancel_order(order_id)` | Cancels one Alpaca order and updates its parent or child record.                                                  |
-| `get_asset_data(symbol)` | Returns asset details and the latest bid/ask quote.                                                               |
+| Method                   | Behavior                                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `sync_orders()`          | Refreshes pending parent entries, protective children, and parent close orders.                                                       |
+| `get_balance()`          | Returns account cash, equity, buying power, and portfolio value.                                                                      |
+| `place_order(...)`       | Creates a parent entry by default; supplying a parent and protective role creates a child. Persists after Alpaca confirms submission. |
+| `open_position(...)`     | Submits a market entry using the positive notional amount approved by `risk.py`.                                                      |
+| `protect_position(...)`  | Creates linked take-profit and trailing-stop children for a parent.                                                                   |
+| `close_order(parent_id)` | Stores the close order ID, status, quantity, and costs on the parent.                                                                 |
+| `close_orders()`         | Closes eligible parent positions tagged with this `PREFIX`.                                                                           |
+| `cancel_order(order_id)` | Cancels one Alpaca order and updates its parent or child record.                                                                      |
+| `get_asset_data(symbol)` | Returns asset details and the latest bid/ask quote.                                                                                   |
 
 ## Decisions
 
@@ -60,9 +61,9 @@ Each run: `STATE` check → key check → `Trade.sync_orders()` → signal gener
   filled_qty > 0 else SUBMITTED. `CLOSED` is only set by our close methods.
 - **`costs`** = filled_qty × filled_avg_price (no fees; Alpaca stock trades are
   commission-free, crypto fees aren't included).
-- **Record before submit**: `place_order` saves `NA` first so a submit that
-  times out after reaching Alpaca is still found by the next sync. `SKIPPED`
-  means Alpaca never received it.
+- **Record after confirmation**: entry and child orders are persisted only after
+  Alpaca returns the submitted order. Risk signal claims are recorded first to
+  prevent duplicate strategy submissions.
 - **`DONE_FOR_DAY` is not terminal** — removed from `_DONE_STATUSES` so
   `close_order` cancels those (they resume next trading day).
 - **`client_order_id` = `<PREFIX>-<uuid7>`**; `PREFIX` ≤ 91 chars so the tag fits
