@@ -157,7 +157,9 @@ the scheduled strategy requires the `--asset` argument.
 
 The selected `--asset` is used for this run. The strategy checks closed 15-minute
 MACD (12/26/9) bars for bullish crosses below zero or bearish crosses above
-zero, confirmed by Parabolic SAR on both 1-minute and 5-minute bars. It only
+zero, confirmed by Parabolic SAR on both 1-minute and 5-minute bars. Crypto
+bars come from Coinbase's public API (no key needed); stock bars come from
+Alpaca's IEX feed. It only
 returns signals; `start.py` sends them to `risk.py`, which requires `STATE=true`,
 prevents duplicate entries, applies `WAGER`, and handles protective exits and
 tracked reversals. Crypto runs 24/7, is long-only, and uses GTC orders. The

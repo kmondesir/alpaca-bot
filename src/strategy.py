@@ -1,4 +1,7 @@
-"""MACD crossover signals confirmed by Parabolic SAR on shorter timeframes."""
+"""MACD crossover signals confirmed by Parabolic SAR on shorter timeframes.
+
+Crypto bars come from Coinbase; stock bars come from Alpaca's IEX feed.
+"""
 
 import logging
 from dataclasses import dataclass
@@ -7,9 +10,10 @@ from typing import Literal
 
 from alpaca.common.enums import Sort
 from alpaca.data.enums import DataFeed
-from alpaca.data.requests import CryptoBarsRequest, StockBarsRequest
+from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
+from market_data import CoinbaseDataClient
 from symbols import is_crypto_symbol, normalize_symbol
 
 logger = logging.getLogger(__name__)
@@ -127,36 +131,28 @@ def _signal_from_bars(
 
 
 class MacdPsarStrategy:
-    def __init__(self, data_client, symbols: tuple[str, ...], crypto_data_client=None):
+    def __init__(self, data_client, symbols: tuple[str, ...], crypto_bars_client=None):
         self.data_client = data_client
-        self.crypto_data_client = crypto_data_client
+        self.crypto_bars_client = crypto_bars_client or CoinbaseDataClient()
         self.symbols = tuple(dict.fromkeys(normalize_symbol(symbol) for symbol in symbols if symbol.strip()))
 
     def _closed_bars(self, symbol: str, minutes: int) -> list:
         now = datetime.now(timezone.utc)
         if is_crypto_symbol(symbol):
-            if self.crypto_data_client is None:
-                raise RuntimeError("A crypto data client is required for crypto symbols")
-            request = CryptoBarsRequest(
-                symbol_or_symbols=symbol,
-                timeframe=TimeFrame(minutes, TimeFrameUnit.Minute),
-                start=now - timedelta(days=14),
-                end=now,
-                limit=_BAR_LIMIT,
-                sort=Sort.DESC,
-            )
-            response = self.crypto_data_client.get_crypto_bars(request)
-        else:
-            request = StockBarsRequest(
-                symbol_or_symbols=symbol,
-                timeframe=TimeFrame(minutes, TimeFrameUnit.Minute),
-                start=now - timedelta(days=14),
-                end=now,
-                limit=_BAR_LIMIT,
-                sort=Sort.DESC,
-                feed=DataFeed.IEX,
-            )
-            response = self.data_client.get_stock_bars(request)
+            # Fetch one extra bar so dropping the in-progress candle still leaves _BAR_LIMIT.
+            bars = self.crypto_bars_client.get_bars(symbol, minutes, _BAR_LIMIT + 1)
+            return [bar for bar in bars if bar.timestamp + timedelta(minutes=minutes) <= now][-_BAR_LIMIT:]
+
+        request = StockBarsRequest(
+            symbol_or_symbols=symbol,
+            timeframe=TimeFrame(minutes, TimeFrameUnit.Minute),
+            start=now - timedelta(days=14),
+            end=now,
+            limit=_BAR_LIMIT,
+            sort=Sort.DESC,
+            feed=DataFeed.IEX,
+        )
+        response = self.data_client.get_stock_bars(request)
         data = response.data if hasattr(response, "data") else response
         bars = next(
             (values for key, values in data.items() if normalize_symbol(key) == normalize_symbol(symbol)),
