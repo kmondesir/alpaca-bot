@@ -137,6 +137,8 @@ def main(argv: Optional[list[str]] = None) -> None:
             (asset,),
             crypto_data_client=trade.crypto_data,
         ).generate_signals()
+        if not signals:
+            logger.info("No strategy signal for %s this run", asset)
         risk.process_strategy_signals(trade, signals)
     else:
         _run_command(args, trade, db)

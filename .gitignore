@@ -34,3 +34,5 @@ data/
 
 # Consecutive-loss tracking (LOSS_DIRECTORY)
 status/
+
+context.md
