@@ -207,6 +207,7 @@ def _protect_pending_strategy_entries(trade) -> None:
                 average_price,
                 description=f"strategy protection for {entry['symbol']}",
                 position_side=entry["side"],
+                parent_id=client_order_id,
             )
             update_strategy_protection(client_order_id, filled_quantity)
             protected_quantity = filled_quantity
@@ -233,7 +234,7 @@ def process_strategy_signals(trade, signals: list) -> list:
 
     positions = {position.symbol.upper(): position for position in trade.client.get_all_positions()}
     submitted_orders = []
-    active_statuses = {"NA", "SUBMITTED", "PARTIAL", "FILLED"}
+    active_statuses = {"NA", "SUBMITTED", "PARTIAL", "FILLED", "OPEN", "CLOSING"}
 
     for signal in signals:
         if not config.STATE:

@@ -105,44 +105,24 @@ For example:
 
 ## Order tracking
 
-Because the script runs fresh every minute, order state is kept in a SQLite
-table (`orders`, in `DB_PATH`) so each run knows what earlier runs did.
-`Trade` writes to it on every place, cancel and close, and `start.py` calls
-`Trade.sync_orders()` at the start of each run to pick up fills,
-cancellations and expiries from Alpaca.
+Order history is stored in `parent` and `child` tables in the SQLite database
+at `DB_PATH`. A parent row represents an initial entry and tracks the overall
+position lifecycle, entry order status, costs, and any manual/reversal close
+order ID, status, costs, side, quantity, and type. Each take-profit or trailing
+stop order is a child row linked to its parent; both children remain for
+history when one fills and the other is canceled.
 
-| Column            | Description                                                                                                        |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `client_order_id` | Order tag, `<PREFIX>-<uuid7>` (primary key).                                                                       |
-| `hostname`        | Computer that placed the order.                                                                                    |
-| `status`          | See below.                                                                                                         |
-| `created`         | When the row was created (UTC, ISO 8601).                                                                          |
-| `modified`        | When the row last changed (UTC, ISO 8601).                                                                         |
-| `description`     | Free text passed to `place_order(description=...)`; replaced with a summary of the close when the order is closed. |
-| `costs`           | Filled quantity × average fill price.                                                                              |
-| `linked_order_id` | Client order ID of a linked protective exit (take-profit/trailing-stop).                                           |
-| `basis`           | Entry cost basis used to calculate P/L for a tracked exit.                                                         |
-| `side`            | Order side (`buy` or `sell`).                                                                                      |
-| `quantity`        | Order quantity in shares or units; null for notional-only requests if Alpaca has no quantity.                      |
-| `order_type`      | Order type (`market`, `limit`, or `trailing_stop`).                                                                |
+Parent overall status is `NA`, `SUBMITTED`, `PARTIAL`, `OPEN`, `CLOSING`,
+`CLOSED`, `CANCELLED`, `EXPIRED`, or `SKIPPED`. Entry and child order statuses
+reflect Alpaca (`NA`, `SUBMITTED`, `PARTIAL`, `FILLED`, `CANCELLED`, `EXPIRED`,
+or `SKIPPED`). `Trade.sync_orders()` refreshes pending entries, protective
+children, and parent close orders on each run. `close_orders()` only closes
+parent positions whose IDs start with the configured `PREFIX`.
 
-| Status      | Meaning                                                                                            |
-| ----------- | -------------------------------------------------------------------------------------------------- |
-| `NA`        | Recorded locally, not yet confirmed at Alpaca.                                                     |
-| `SUBMITTED` | Accepted by Alpaca, nothing filled yet.                                                            |
-| `PARTIAL`   | Partly filled, still working.                                                                      |
-| `FILLED`    | Completely filled.                                                                                 |
-| `CANCELLED` | Cancelled or rejected (`costs` > 0 if it partly filled first).                                     |
-| `CLOSED`    | Filled quantity has been closed out. `close_order` skips these, so an order is never closed twice. |
-
-Closing an order marks its original row `CLOSED` and records the closing market
-order in a separate row so its fill and P/L can be tracked.
-
-`close_orders()` only acts on rows whose `client_order_id` starts with this
-`.env`'s `PREFIX` and that are still working or hold a fill. Orders from other
-prefixes, and positions not in the database, are left alone.
-| `EXPIRED` | Expired at Alpaca (`costs` > 0 if it partly filled first). |
-| `SKIPPED` | Never reached Alpaca (e.g. the submit failed). |
+Duplicate strategy signals are claimed atomically in the risk ledger, also
+stored in the same database. This database has not been used for live orders;
+the obsolete `orders` table is dropped during initialization; no order data is
+migrated.
 
 ## Run
 

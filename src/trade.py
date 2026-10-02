@@ -1,7 +1,7 @@
 """Thin wrapper around the Alpaca trading and market data APIs.
 
-Every order placed, cancelled or closed through Trade is recorded in the
-orders table (see db.py), so later cron runs know what earlier runs did.
+Entries are stored as parents and protective exits as child rows (see db.py),
+so later cron runs can reconcile their status.
 """
 
 import logging
@@ -54,7 +54,7 @@ def _costs(order) -> float:
 
 
 def _db_status(order) -> str:
-    """Map an Alpaca order status onto the orders table's status."""
+    """Map an Alpaca order status to the persisted status vocabulary."""
     if order.status == OrderStatus.FILLED:
         return "FILLED"
     if order.status == OrderStatus.EXPIRED:
@@ -72,70 +72,154 @@ class Trade:
         self.crypto_data = CryptoHistoricalDataClient(key, secret)
         self.db = db
 
-    def _record(self, order, description: Optional[str] = None) -> str:
-        """Save the order's current Alpaca state to the database."""
+    def _record_parent(self, order, description: Optional[str] = None) -> str:
+        """Save the Alpaca state for an entry order and its parent position."""
         status = _db_status(order)
-        self.db.save(
+        self.db.save_parent_entry(
             order.client_order_id,
             status,
             description,
             _costs(order),
-            side=order.side.value,
-            quantity=float(order.qty) if order.qty is not None else None,
-            order_type=order.order_type.value,
+            order.side.value,
+            float(order.qty) if order.qty is not None else None,
+            order.order_type.value,
+        )
+        return status
+
+    def _record_child(self, order, description: Optional[str] = None) -> str:
+        """Save the Alpaca state for a protective child order."""
+        status = _db_status(order)
+        row = self.db.get_child(order.client_order_id)
+        if row is None:
+            raise KeyError(f"No child order found for {order.client_order_id!r}")
+        self.db.save_child_order(
+            order.client_order_id,
+            status,
+            description,
+            _costs(order),
+            order.side.value,
+            float(order.qty) if order.qty is not None else None,
+            order.order_type.value,
+            row["basis"],
         )
         return status
 
     def sync_orders(self) -> None:
-        """Refresh every pending order in the database from Alpaca.
-
-        Call once at the start of each run so the table reflects fills,
-        cancellations and expiries that happened since the last run.
-        """
-        for row in self.db.by_status(*PENDING_STATUSES):
-            client_order_id = row["client_order_id"]
+        """Refresh pending entry, protective child, and parent close orders."""
+        for row in self.db.parents_by_entry_status(*PENDING_STATUSES):
+            parent_id = row["parent_id"]
             try:
-                order = self.client.get_order_by_client_id(client_order_id)
-            except APIError as e:
-                if e.status_code == 404 and row["status"] == "NA":
-                    self.db.save(client_order_id, "SKIPPED", "not found at Alpaca")
-                    logger.info("%s never reached Alpaca; marked SKIPPED", client_order_id)
+                order = self.client.get_order_by_client_id(parent_id)
+            except APIError as error:
+                if error.status_code == 404 and row["entry_status"] == "NA":
+                    self.db.save_parent_entry(
+                        parent_id,
+                        "SKIPPED",
+                        "not found at Alpaca",
+                        row["costs"] or 0,
+                        row["side"],
+                        row["quantity"],
+                        row["order_type"],
+                    )
+                    logger.info("%s never reached Alpaca; marked SKIPPED", parent_id)
                 else:
-                    logger.warning("Could not sync %s: %s", client_order_id, e)
+                    logger.warning("Could not sync entry %s: %s", parent_id, error)
                 continue
-            status = self._record(order)
-            self._finalize(client_order_id, status, order.symbol, row["status"])
+            status = self._record_parent(order)
+            self._log_transition(parent_id, status, row["entry_status"])
 
-    def _finalize(
-        self, client_order_id: str, status: str, symbol: str, previous_status: Optional[str] = None
-    ) -> None:
-        """React to a status just saved to the database: log transitions, and on a
-        fill, report any tracked pnl and cancel a linked sibling order.
-        """
+        for row in self.db.children_by_status(*PENDING_STATUSES):
+            child_id = row["child_id"]
+            try:
+                order = self.client.get_order_by_client_id(child_id)
+            except APIError as error:
+                if error.status_code == 404 and row["status"] == "NA":
+                    self.db.save_child_order(
+                        child_id,
+                        "SKIPPED",
+                        "not found at Alpaca",
+                        row["costs"] or 0,
+                        row["side"],
+                        row["quantity"],
+                        row["order_type"],
+                        row["basis"],
+                    )
+                    logger.info("%s never reached Alpaca; marked SKIPPED", child_id)
+                else:
+                    logger.warning("Could not sync child %s: %s", child_id, error)
+                continue
+            status = self._record_child(order)
+            self._finalize_child(child_id, status, row["status"])
+
+        for row in self.db.parents_by_close_status(*PENDING_STATUSES):
+            parent_id = row["parent_id"]
+            close_id = row["close_order_id"]
+            try:
+                order = self.client.get_order_by_client_id(close_id)
+            except APIError as error:
+                if error.status_code == 404 and row["close_status"] == "NA":
+                    status = "SKIPPED"
+                    self.db.save_parent_close(
+                        parent_id, close_id, status, row["close_costs"] or 0,
+                        row["close_side"], row["close_quantity"], row["close_type"],
+                    )
+                else:
+                    logger.warning("Could not sync close %s: %s", close_id, error)
+                continue
+            status = _db_status(order)
+            self.db.save_parent_close(
+                parent_id,
+                close_id,
+                status,
+                _costs(order),
+                order.side.value,
+                float(order.qty) if order.qty is not None else None,
+                order.order_type.value,
+            )
+            self._finalize_parent_close(parent_id, status, row["close_status"])
+
+    def _log_transition(self, order_id: str, status: str, previous_status: Optional[str]) -> None:
         if previous_status is not None and status != previous_status:
-            logger.info("%s: %s -> %s", client_order_id, previous_status, status)
+            logger.info("%s: %s -> %s", order_id, previous_status, status)
+
+    def _finalize_child(self, child_id: str, status: str, previous_status: Optional[str]) -> None:
+        self._log_transition(child_id, status, previous_status)
         if status != "FILLED":
             return
-        row = self.db.get(client_order_id)
+        row = self.db.get_child(child_id)
+        parent = self.db.get_parent(row["parent_id"])
+        self.db.mark_parent_closed(parent["parent_id"])
         if row["basis"] is not None:
-            closing_side = row["side"]
-            pnl = row["basis"] - row["costs"] if closing_side == OrderSide.BUY.value else row["costs"] - row["basis"]
-            risk.record_trade(client_order_id, pnl, symbol)
-            entry_side = OrderSide.SELL.value if closing_side == OrderSide.BUY.value else OrderSide.BUY.value
-            risk.mark_strategy_position_closed(symbol, entry_side)
-        if row["linked_order_id"]:
-            self._cancel_sibling(row["linked_order_id"])
+            pnl = row["costs"] - row["basis"] if row["side"] == OrderSide.SELL.value else row["basis"] - row["costs"]
+            risk.record_trade(child_id, pnl, parent["symbol"])
+            entry_side = OrderSide.BUY.value if row["side"] == OrderSide.SELL.value else OrderSide.SELL.value
+            risk.mark_strategy_position_closed(parent["symbol"], entry_side)
+        if row["linked_child_id"]:
+            self._cancel_sibling(row["linked_child_id"])
+
+    def _finalize_parent_close(
+        self, parent_id: str, status: str, previous_status: Optional[str]
+    ) -> None:
+        self._log_transition(parent_id, status, previous_status)
+        if status != "FILLED":
+            return
+        parent = self.db.get_parent(parent_id)
+        basis = parent["basis"] if parent["basis"] is not None else parent["costs"]
+        if basis is not None:
+            pnl = parent["close_costs"] - basis if parent["side"] == OrderSide.BUY.value else basis - parent["close_costs"]
+            risk.record_trade(parent_id, pnl, parent["symbol"])
+            risk.mark_strategy_position_closed(parent["symbol"], parent["side"])
 
     def _cancel_sibling(self, sibling_id: str) -> None:
-        """Cancel the other leg of a take-profit / trailing-stop pair once one fills."""
-        sibling = self.db.get(sibling_id)
+        """Cancel the other protective child after one leg fills."""
+        sibling = self.db.get_child(sibling_id)
         if sibling is None or sibling["status"] not in PENDING_STATUSES:
             return
         try:
             self.cancel_order(sibling_id)
-            logger.info("Cancelled %s: sibling order filled", sibling_id)
-        except APIError as e:
-            logger.warning("Could not cancel sibling %s: %s", sibling_id, e)
+            logger.info("Cancelled %s: sibling protective order filled", sibling_id)
+        except APIError as error:
+            logger.warning("Could not cancel sibling %s: %s", sibling_id, error)
 
     def get_balance(self) -> dict:
         """Return the account's cash, equity and buying power."""
@@ -181,6 +265,8 @@ class Trade:
         time_in_force: str = "day",
         client_order_id: Optional[str] = None,
         description: Optional[str] = None,
+        parent_id: Optional[str] = None,
+        child_role: Optional[str] = None,
     ):
         """Submit a market, limit, or trailing-stop order.
 
@@ -196,6 +282,8 @@ class Trade:
             raise ValueError("Pass exactly one of qty or notional")
         if limit_price is not None and trail_percent is not None:
             raise ValueError("Pass at most one of limit_price or trail_percent")
+        if (parent_id is None) != (child_role is None):
+            raise ValueError("parent_id and child_role must be provided together")
         order_side = OrderSide(side.lower())
         self._check_position_limit(symbol)
         client_order_id = client_order_id or config.new_client_order_id()
@@ -221,16 +309,25 @@ class Trade:
 
         # Record first: if the submit times out after reaching Alpaca, the
         # next sync_orders() still finds the order under this tag.
-        self.db.save(
-            client_order_id,
-            "NA",
-            description,
-            side=order_side.value,
-            quantity=qty,
-            order_type=order_type,
-        )
+        if parent_id is None:
+            self.db.create_parent(
+                client_order_id, symbol, description, order_side.value, qty, order_type
+            )
+        else:
+            self.db.create_child(
+                client_order_id,
+                parent_id,
+                child_role,
+                description,
+                order_side.value,
+                qty,
+                order_type,
+            )
         order = self.client.submit_order(order_data=request)
-        self._record(order)
+        if parent_id is None:
+            self._record_parent(order)
+        else:
+            self._record_child(order)
         logger.info("Placed %s %s %s (%s)", side, qty or notional, symbol, client_order_id)
         return order
 
@@ -285,6 +382,8 @@ class Trade:
         avg_price: float,
         description: Optional[str] = None,
         position_side: str = "buy",
+        *,
+        parent_id: str,
     ) -> tuple:
         """Submit enabled protective exits for a filled long or short position.
 
@@ -297,6 +396,8 @@ class Trade:
         entry_side = OrderSide(position_side.lower())
         if entry_side not in (OrderSide.BUY, OrderSide.SELL):
             raise ValueError("position_side must be 'buy' or 'sell'")
+        if self.db.get_parent(parent_id) is None:
+            raise KeyError(f"No parent position found for {parent_id!r}")
         exit_side = OrderSide.SELL if entry_side == OrderSide.BUY else OrderSide.BUY
         take_profit = None
         trailing_stop = None
@@ -316,6 +417,8 @@ class Trade:
                 limit_price=take_profit_price,
                 client_order_id=take_profit_id,
                 description=description or f"take-profit for {symbol}",
+                parent_id=parent_id,
+                child_role="take_profit",
             )
         if config.TRAILING_STOP_LOSS > 0:
             trailing_stop_id = config.new_client_order_id()
@@ -326,27 +429,49 @@ class Trade:
                 trail_percent=config.TRAILING_STOP_LOSS * 100,
                 client_order_id=trailing_stop_id,
                 description=description or f"trailing-stop for {symbol}",
+                parent_id=parent_id,
+                child_role="trailing_stop",
             )
 
         if take_profit_id and trailing_stop_id:
-            self.db.update(take_profit_id, linked_order_id=trailing_stop_id, basis=basis)
-            self.db.update(trailing_stop_id, linked_order_id=take_profit_id, basis=basis)
+            self.db.link_children(take_profit_id, trailing_stop_id, basis)
         elif take_profit_id:
-            self.db.update(take_profit_id, basis=basis)
+            self.db.save_child_order(
+                take_profit_id,
+                _db_status(take_profit),
+                description,
+                _costs(take_profit),
+                take_profit.side.value,
+                float(take_profit.qty) if take_profit.qty is not None else None,
+                take_profit.order_type.value,
+                basis,
+            )
         elif trailing_stop_id:
-            self.db.update(trailing_stop_id, basis=basis)
+            self.db.save_child_order(
+                trailing_stop_id,
+                _db_status(trailing_stop),
+                description,
+                _costs(trailing_stop),
+                trailing_stop.side.value,
+                float(trailing_stop.qty) if trailing_stop.qty is not None else None,
+                trailing_stop.order_type.value,
+                basis,
+            )
+        for order in (take_profit, trailing_stop):
+            if order is not None and _db_status(order) == "FILLED":
+                self._finalize_child(order.client_order_id, "FILLED", "NA")
         return take_profit, trailing_stop
 
     def close_order(self, client_order_id: str):
-        """Unwind a single order, looked up by its client_order_id tag.
-
-        Cancels any unfilled remainder, then closes the quantity that did fill
-        with a market order. Returns the closing order, or None if nothing
-        filled or the order was already closed by an earlier run.
-        """
-        row = self.db.get(client_order_id)
-        if row is not None and row["status"] == "CLOSED":
-            logger.info("%s already closed; skipping", client_order_id)
+        """Close a parent position and retain the close order details on it."""
+        row = self.db.get_parent(client_order_id)
+        if row is None:
+            raise KeyError(f"No parent order found for {client_order_id!r}")
+        if row["status"] in ("CLOSED", "CLOSING"):
+            logger.info("%s already closed or closing; skipping", client_order_id)
+            return None
+        if row["close_order_id"] and row["close_status"] in PENDING_STATUSES:
+            logger.info("%s already has a pending close order; skipping", client_order_id)
             return None
 
         order = self.client.get_order_by_client_id(client_order_id)
@@ -356,32 +481,23 @@ class Trade:
 
         filled = _filled(order)
         if filled == 0:
-            self._record(order, "close_order: nothing filled, order cancelled")
+            self._record_parent(order, "close_order: nothing filled, order cancelled")
             return None
+
         closing = self.client.close_position(
             order.asset_id, close_options=ClosePositionRequest(qty=str(filled))
         )
-        # The entry row is marked CLOSED; the closing order gets its own row (keyed
-        # by Alpaca's auto-generated client_order_id) so sync_orders() can later
-        # report its pnl against the entry's cost basis once it fills.
-        self.db.save(
-            client_order_id,
-            "CLOSED",
-            f"close_order: closed {filled:g} {order.symbol} at market (closing order {closing.id})",
-            _costs(order),
-        )
         closing_status = _db_status(closing)
-        self.db.save(
+        self.db.save_parent_close(
+            client_order_id,
             closing.client_order_id,
             closing_status,
-            f"close_order: closing order for {client_order_id}",
             _costs(closing),
-            basis=_costs(order),
-            side=closing.side.value,
-            quantity=float(closing.qty) if closing.qty is not None else None,
-            order_type=closing.order_type.value,
+            closing.side.value,
+            float(closing.qty) if closing.qty is not None else None,
+            closing.order_type.value,
         )
-        self._finalize(closing.client_order_id, closing_status, order.symbol)
+        self._finalize_parent_close(client_order_id, closing_status, None)
         logger.info("Closed %s of %s (%s)", filled, order.symbol, client_order_id)
         return closing
 
@@ -393,10 +509,10 @@ class Trade:
         left alone. Returns the closing orders that were sent.
         """
         closing_orders = []
-        for row in self.db.by_status(
-            "SUBMITTED", "PARTIAL", "FILLED", "CANCELLED", "EXPIRED"
+        for row in self.db.parents_by_status(
+            "NA", "SUBMITTED", "PARTIAL", "OPEN", "FILLED", "CANCELLED", "EXPIRED"
         ):
-            client_order_id = row["client_order_id"]
+            client_order_id = row["parent_id"]
             if not client_order_id.startswith(f"{config.PREFIX}-"):
                 continue
             # A cancelled or expired row only needs closing if it partly filled.
@@ -416,7 +532,11 @@ class Trade:
         order = self.client.get_order_by_client_id(client_order_id)
         self.client.cancel_order_by_id(order.id)
         # Cancellation is asynchronous; the next sync_orders() records the result.
-        self._record(self.client.get_order_by_id(order.id))
+        order = self.client.get_order_by_id(order.id)
+        if self.db.get_child(client_order_id) is not None:
+            self._record_child(order)
+        else:
+            self._record_parent(order)
 
     def cancel_orders(self):
         """Cancel all open orders, leaving positions untouched."""

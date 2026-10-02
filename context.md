@@ -13,50 +13,48 @@ real Alpaca account; checks use mocked clients or no network. `start.py` checks
 
 ## Execution model
 
-`start.py` does not poll or loop. A cron job runs it every 60 seconds; each run
-does its work and exits. So nothing stays in memory between runs. State that
-must carry over lives in the `orders` table (`src/db.py`) and risk-owned
-`strategy_signals` table in the same SQLite database. Don't add sleep/poll
-loops.
+`start.py` runs once per cron tick and exits. Entry and protective order state
+lives in `parent` and `child` tables; deduplicated signal claims live in the
+risk-owned `strategy_signals` table. Do not add polling loops.
 
-Each run: `STATE` check → key check → `Trade.sync_orders()` → signal generation → risk gates and execution.
+Each run: `STATE` check → key check → `Trade.sync_orders()` → signal generation
+→ risk state/market gates → order, close, and protection handling.
 
 ## Files
 
-- `src/config.py` — loads `.env` and `src/config.json`, sets up logging on
-  import, `uuid7()`, `new_client_order_id()`.
-- `src/config.json` — `demo` / `prod` trading base URLs.
-- `src/db.py` — `OrderDB`: SQLite `orders` table (`save` upsert, `get`, `by_status`).
-- `src/trade.py` — `Trade(key, secret, url, db)` wrapping alpaca-py; records every action in `db`.
-- `src/strategy.py` — generates MACD crossover signals confirmed by Parabolic SAR; does not execute or risk-gate trades.
-- `src/risk.py` — tracks losses, claims strategy signals atomically, gates entries, and manages strategy protection/reversal closes.
-- `src/strategy.py` — generates MACD crossover signals confirmed by Parabolic SAR; does not execute or risk-gate trades.
-- `src/start.py` — entry point.
-- `.env` — keys, `DEMO`, `STATE`, log settings, `PREFIX`, `DB_PATH` (gitignored).
-- `.env` — keys, `DEMO`, `STATE`, `STRATEGY_SYMBOLS`, log settings, `PREFIX`, `DB_PATH` (gitignored).
-- `data/alpaca.db` — default database location (gitignored).
-- `.venv/` — local virtualenv with `requirements.txt` installed (alpaca-py 0.44.0, Python 3.13).
+- `src/config.py` — loads `.env`, sets up logging, and provides UUID helpers.
+- `src/config.json` — demo and production trading base URLs.
+- `src/db.py` — `OrderDB` for entry parents, protective children, and parent close details.
+- `src/risk.py` — tracks losses, atomically claims signals, gates trades, and handles reversals/protection.
+- `src/strategy.py` — generates MACD crossover signals confirmed by Parabolic SAR; it does not execute trades.
+- `src/trade.py` — Alpaca trading/data wrapper; records entries on parents and protective exits on children.
+- `src/start.py` — checks `STATE` and credentials, syncs orders, then passes signals to risk.
+- `.env` — credentials, `STATE`, `STRATEGY_SYMBOLS`, and risk/log settings; gitignored.
+- `data/alpaca.db` — default SQLite database location; gitignored.
+- `.venv/` — project virtual environment.
 
 ## Trade methods
 
-| Method                                                                                                                              | Behavior                                                                                                                                                                                                                                                    |
-| ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sync_orders()`                                                                                                                     | Re-fetches every `NA`/`SUBMITTED`/`PARTIAL` row from Alpaca and updates status + costs. `NA` rows Alpaca returns 404 for become `SKIPPED`.                                                                                                                  |
-| `get_balance()`                                                                                                                     | Dict of currency, cash, equity, buying power, portfolio value.                                                                                                                                                                                              |
-| `place_order(symbol, side, qty=None, notional=None, limit_price=None, time_in_force="day", client_order_id=None, description=None)` | Market order, or limit if `limit_price`. Exactly one of `qty`/`notional`. Tag defaults to `<PREFIX>-<uuid7>`. Saves `NA` before submitting, then the Alpaca status.                                                                                         |
-| `close_order(client_order_id)`                                                                                                      | Skips if the row is `CLOSED`. Otherwise cancels unfilled remainder, closes the filled qty at market, and updates the same row: `CLOSED`, new `modified`, description naming qty + closing order id. Nothing filled → `CANCELLED` with a description.        |
-| `close_orders()`                                                                                                                    | Runs `close_order` on every row with this `PREFIX` that is `SUBMITTED`/`PARTIAL`/`FILLED`, or `CANCELLED`/`EXPIRED` with costs > 0. Other prefixes and non-DB positions untouched. One failure is logged and the rest continue. Returns the closing orders. |
-| `cancel_order(client_order_id)`                                                                                                     | Cancels one order; records current state (final state arrives on next sync).                                                                                                                                                                                |
-| `cancel_orders()`                                                                                                                   | Cancels all open orders, then `sync_orders()`.                                                                                                                                                                                                              |
-| `get_asset_data(symbol)`                                                                                                            | Asset details + latest bid/ask (stock or crypto data client).                                                                                                                                                                                               |
+| Method                   | Behavior                                                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `sync_orders()`          | Refreshes pending parent entries, protective children, and parent close orders.                                   |
+| `get_balance()`          | Returns account cash, equity, buying power, and portfolio value.                                                  |
+| `place_order(...)`       | Creates a parent entry by default; supplying a parent and protective role creates a child. Records before submit. |
+| `open_position(...)`     | Sizes a long or short entry using `WAGER`.                                                                        |
+| `protect_position(...)`  | Creates linked take-profit and trailing-stop children for a parent.                                               |
+| `close_order(parent_id)` | Stores the close order ID, status, quantity, and costs on the parent.                                             |
+| `close_orders()`         | Closes eligible parent positions tagged with this `PREFIX`.                                                       |
+| `cancel_order(order_id)` | Cancels one Alpaca order and updates its parent or child record.                                                  |
+| `get_asset_data(symbol)` | Returns asset details and the latest bid/ask quote.                                                               |
 
 ## Decisions
 
-- **Order tracking in SQLite** (user's design): columns `client_order_id` (PK),
-  `hostname`, `status`, `created`, `modified`, `description`, `costs`.
-  Statuses `NA, SUBMITTED, PARTIAL, FILLED, CANCELLED, CLOSED, EXPIRED, SKIPPED`
-  enforced by a CHECK constraint. Timestamps are ISO 8601 UTC with `Z`.
-  One row per order: closing orders are not given their own row (user decision).
+- **Parent/child order tracking in SQLite** (user's design): each `parent` row
+  represents an entry and overall position; each protective take-profit or
+  trailing-stop order is a linked `child` row. Manual/reversal close details
+  live on the parent. Both protective children remain for history after one
+  fills and the sibling is canceled.
+- **Fresh schema:** `OrderDB` drops the unused flat `orders` table on initialization and creates `parent` and `child`; no migration is performed.
 - **Status mapping** from Alpaca: filled→FILLED, expired→EXPIRED,
   canceled/rejected/replaced→CANCELLED, anything else→PARTIAL if
   filled_qty > 0 else SUBMITTED. `CLOSED` is only set by our close methods.
@@ -72,7 +70,7 @@ Each run: `STATE` check → key check → `Trade.sync_orders()` → signal gener
   Alpaca cannot filter lists by tag, so the DB is the index.
 - **No custom expiry** in Alpaca's time-in-force (`day`, `gtc`, `opg`, `cls`,
   `ioc`, `fok`; `gtc` auto-cancels after 90 days; crypto allows only `gtc`/`ioc`).
-  A custom expiry could now be built on the `orders` table.
+  A custom expiry could be added to the parent lifecycle if needed.
 - **`DEMO`** (was `ALPACA_PAPER`) selects `config.BASE_URL` from `config.json`;
   defaults to `true`. URLs omit `/v2` because the SDK appends it.
 - **`STATE`** is a kill switch; defaults to `false` so nothing runs unless set.

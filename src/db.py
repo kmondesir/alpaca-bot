@@ -1,5 +1,4 @@
 """SQLite record of orders, so state carries over between cron runs."""
-
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -7,42 +6,49 @@ from typing import Optional
 
 import config
 
-# NA        recorded locally, not yet confirmed at Alpaca
-# SUBMITTED accepted by Alpaca, nothing filled yet
-# PARTIAL   partly filled, still working
-# FILLED    completely filled
-# CANCELLED cancelled or rejected (costs > 0 if it partly filled first)
-# CLOSED    filled quantity has been closed out by close_order(s)
-# EXPIRED   expired at Alpaca (costs > 0 if it partly filled first)
-# SKIPPED   never reached Alpaca
-STATUSES = (
-    "NA",
-    "SUBMITTED",
-    "PARTIAL",
-    "FILLED",
-    "CANCELLED",
-    "CLOSED",
-    "EXPIRED",
-    "SKIPPED",
-)
-
-# Orders whose state can still change at Alpaca, so each run re-checks them.
+STATUSES = ("NA", "SUBMITTED", "PARTIAL", "FILLED", "CANCELLED", "CLOSED", "EXPIRED", "SKIPPED")
 PENDING_STATUSES = ("NA", "SUBMITTED", "PARTIAL")
 
-_SCHEMA = f"""
-CREATE TABLE IF NOT EXISTS orders (
-    client_order_id TEXT PRIMARY KEY,
+_PARENT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS parent (
+    parent_id       TEXT PRIMARY KEY,
     hostname        TEXT NOT NULL,
-    status          TEXT NOT NULL CHECK (status IN ({", ".join(f"'{s}'" for s in STATUSES)})),
+    status          TEXT NOT NULL,
+    entry_status    TEXT NOT NULL,
     created         TEXT NOT NULL,
     modified        TEXT NOT NULL,
+    symbol          TEXT NOT NULL,
     description     TEXT,
     costs           REAL,
-    linked_order_id TEXT,
     basis           REAL,
     side            TEXT,
     quantity        REAL,
-    order_type      TEXT
+    order_type      TEXT,
+    close_order_id  TEXT UNIQUE,
+    close_status    TEXT,
+    close_costs     REAL,
+    close_side      TEXT,
+    close_quantity  REAL,
+    close_type      TEXT
+)
+"""
+
+_CHILD_SCHEMA = """
+CREATE TABLE IF NOT EXISTS child (
+    child_id         TEXT PRIMARY KEY,
+    parent_id        TEXT NOT NULL REFERENCES parent(parent_id),
+    role             TEXT NOT NULL CHECK (role IN ('take_profit', 'trailing_stop')),
+    hostname         TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    created          TEXT NOT NULL,
+    modified         TEXT NOT NULL,
+    description      TEXT,
+    costs            REAL,
+    linked_child_id  TEXT,
+    basis            REAL,
+    side             TEXT,
+    quantity         REAL,
+    order_type       TEXT
 )
 """
 
@@ -56,141 +62,261 @@ class OrderDB:
     def __init__(self, path: Optional[Path] = None):
         path = Path(path or config.DB_PATH)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(path)
+        self.conn = sqlite3.connect(path, timeout=30)
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA foreign_keys = ON")
         with self.conn:
-            self.conn.execute(_SCHEMA)
-            for ddl in (
-                "ALTER TABLE orders ADD COLUMN linked_order_id TEXT",
-                "ALTER TABLE orders ADD COLUMN basis REAL",
-                "ALTER TABLE orders ADD COLUMN side TEXT",
-                "ALTER TABLE orders ADD COLUMN quantity REAL",
-                "ALTER TABLE orders ADD COLUMN order_type TEXT",
-            ):
-                try:
-                    self.conn.execute(ddl)
-                except sqlite3.OperationalError:
-                    pass  # column already exists, added after this table's initial release
+            self.conn.execute("DROP TABLE IF EXISTS orders")
+            self.conn.execute(_PARENT_SCHEMA)
+            self.conn.execute(_CHILD_SCHEMA)
 
-    def save(
+    def create_parent(
         self,
-        client_order_id: str,
-        status: str,
-        description: Optional[str] = None,
-        costs: Optional[float] = None,
-        linked_order_id: Optional[str] = None,
-        basis: Optional[float] = None,
-        side: Optional[str] = None,
-        quantity: Optional[float] = None,
-        order_type: Optional[str] = None,
+        parent_id: str,
+        symbol: str,
+        description: Optional[str],
+        side: str,
+        quantity: Optional[float],
+        order_type: str,
     ) -> None:
-        """Insert or update an order row.
-
-        created and hostname are set on insert only; modified is always
-        refreshed. Other fields are left unchanged when None.
-        """
-        if status not in STATUSES:
-            raise ValueError(f"Unknown status {status!r}")
         now = utc_now()
         with self.conn:
             self.conn.execute(
                 """
-                INSERT INTO orders
-                    (client_order_id, hostname, status, created, modified, description, costs,
-                     linked_order_id, basis, side, quantity, order_type)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (client_order_id) DO UPDATE SET
-                    status          = excluded.status,
-                    modified        = excluded.modified,
-                    description     = COALESCE(excluded.description, orders.description),
-                    costs           = COALESCE(excluded.costs, orders.costs),
-                    linked_order_id = COALESCE(excluded.linked_order_id, orders.linked_order_id),
-                    basis           = COALESCE(excluded.basis, orders.basis),
-                    side            = COALESCE(excluded.side, orders.side),
-                    quantity        = COALESCE(excluded.quantity, orders.quantity),
-                    order_type      = COALESCE(excluded.order_type, orders.order_type)
+                INSERT INTO parent
+                    (parent_id, hostname, status, entry_status, created, modified,
+                     symbol, description, side, quantity, order_type)
+                VALUES (?, ?, 'NA', 'NA', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    client_order_id,
+                    parent_id,
                     config.COMPUTER_NAME,
-                    status,
                     now,
                     now,
+                    symbol,
                     description,
-                    costs,
-                    linked_order_id,
-                    basis,
                     side,
                     quantity,
                     order_type,
                 ),
             )
 
-    def update(
+    def save_parent_entry(
         self,
-        client_order_id: str,
-        status: Optional[str] = None,
-        description: Optional[str] = None,
-        costs: Optional[float] = None,
-        linked_order_id: Optional[str] = None,
-        basis: Optional[float] = None,
-        side: Optional[str] = None,
-        quantity: Optional[float] = None,
-        order_type: Optional[str] = None,
+        parent_id: str,
+        status: str,
+        description: Optional[str],
+        costs: float,
+        side: str,
+        quantity: Optional[float],
+        order_type: str,
     ) -> None:
-        """Update fields on an existing order row, leaving None fields unchanged.
+        if status not in STATUSES:
+            raise ValueError(f"Unknown entry status {status!r}")
+        row = self.get_parent(parent_id)
+        if row is None:
+            raise KeyError(f"No parent order found for {parent_id!r}")
+        overall_status = "OPEN" if costs > 0 else status
+        if row["status"] in ("CLOSING", "CLOSED"):
+            overall_status = row["status"]
+        now = utc_now()
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE parent
+                SET status = ?, entry_status = ?, modified = ?,
+                    description = COALESCE(?, description), costs = ?,
+                    basis = CASE WHEN ? > 0 THEN ? ELSE basis END,
+                    side = ?, quantity = COALESCE(?, quantity), order_type = ?
+                WHERE parent_id = ?
+                """,
+                (
+                    overall_status,
+                    status,
+                    now,
+                    description,
+                    costs,
+                    costs,
+                    costs,
+                    side,
+                    quantity,
+                    order_type,
+                    parent_id,
+                ),
+            )
 
-        Raises KeyError if no row exists for client_order_id.
-        """
-        if status is not None and status not in STATUSES:
-            raise ValueError(f"Unknown status {status!r}")
+    def create_child(
+        self,
+        child_id: str,
+        parent_id: str,
+        role: str,
+        description: Optional[str],
+        side: str,
+        quantity: Optional[float],
+        order_type: str,
+    ) -> None:
+        if role not in ("take_profit", "trailing_stop"):
+            raise ValueError(f"Unknown protective child role {role!r}")
+        now = utc_now()
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO child
+                    (child_id, parent_id, role, hostname, status, created, modified,
+                     description, side, quantity, order_type)
+                VALUES (?, ?, ?, ?, 'NA', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    child_id,
+                    parent_id,
+                    role,
+                    config.COMPUTER_NAME,
+                    now,
+                    now,
+                    description,
+                    side,
+                    quantity,
+                    order_type,
+                ),
+            )
+
+    def save_child_order(
+        self,
+        child_id: str,
+        status: str,
+        description: Optional[str],
+        costs: float,
+        side: str,
+        quantity: Optional[float],
+        order_type: str,
+        basis: Optional[float] = None,
+    ) -> None:
+        if status not in STATUSES:
+            raise ValueError(f"Unknown child status {status!r}")
         now = utc_now()
         with self.conn:
             cursor = self.conn.execute(
                 """
-                UPDATE orders
-                SET status          = COALESCE(?, status),
-                    modified        = ?,
-                    description     = COALESCE(?, description),
-                    costs           = COALESCE(?, costs),
-                    linked_order_id = COALESCE(?, linked_order_id),
-                    basis           = COALESCE(?, basis),
-                    side            = COALESCE(?, side),
-                    quantity        = COALESCE(?, quantity),
-                    order_type      = COALESCE(?, order_type)
-                WHERE client_order_id = ?
+                UPDATE child
+                SET status = ?, modified = ?, description = COALESCE(?, description),
+                    costs = ?, side = ?, quantity = COALESCE(?, quantity),
+                    order_type = ?, basis = COALESCE(?, basis)
+                WHERE child_id = ?
+                """,
+                (status, now, description, costs, side, quantity, order_type, basis, child_id),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"No child order found for {child_id!r}")
+
+    def link_children(self, first_id: str, second_id: str, basis: float) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE child SET linked_child_id = ?, basis = ? WHERE child_id = ?",
+                (second_id, basis, first_id),
+            )
+            self.conn.execute(
+                "UPDATE child SET linked_child_id = ?, basis = ? WHERE child_id = ?",
+                (first_id, basis, second_id),
+            )
+
+    def save_parent_close(
+        self,
+        parent_id: str,
+        close_order_id: str,
+        status: str,
+        costs: float,
+        side: str,
+        quantity: Optional[float],
+        order_type: str,
+    ) -> None:
+        if status not in STATUSES:
+            raise ValueError(f"Unknown close status {status!r}")
+        row = self.get_parent(parent_id)
+        if row is None:
+            raise KeyError(f"No parent order found for {parent_id!r}")
+        overall_status = "CLOSED" if status == "FILLED" else "CLOSING"
+        if status in ("CANCELLED", "EXPIRED", "SKIPPED"):
+            overall_status = "OPEN" if (row["costs"] or 0) > 0 else status
+        now = utc_now()
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE parent
+                SET status = ?, modified = ?, close_order_id = ?, close_status = ?,
+                    close_costs = ?, close_side = ?, close_quantity = ?, close_type = ?
+                WHERE parent_id = ?
                 """,
                 (
-                    status,
+                    overall_status,
                     now,
-                    description,
+                    close_order_id,
+                    status,
                     costs,
-                    linked_order_id,
-                    basis,
                     side,
                     quantity,
                     order_type,
-                    client_order_id,
+                    parent_id,
                 ),
             )
-            if cursor.rowcount == 0:
-                raise KeyError(f"No order found for client_order_id {client_order_id!r}")
 
-    def get(self, client_order_id: str) -> Optional[sqlite3.Row]:
-        return self.conn.execute(
-            "SELECT * FROM orders WHERE client_order_id = ?", (client_order_id,)
-        ).fetchone()
+    def get_parent(self, parent_id: str) -> Optional[dict]:
+        row = self.conn.execute("SELECT * FROM parent WHERE parent_id = ?", (parent_id,)).fetchone()
+        return dict(row) if row is not None else None
 
-    def get_sibling(self, client_order_id: str) -> Optional[sqlite3.Row]:
-        """Return the linked order row (e.g. take-profit <-> trailing-stop), if any."""
-        row = self.get(client_order_id)
-        if row is None or row["linked_order_id"] is None:
+    def get_child(self, child_id: str) -> Optional[dict]:
+        row = self.conn.execute("SELECT * FROM child WHERE child_id = ?", (child_id,)).fetchone()
+        return dict(row) if row is not None else None
+
+    def get(self, client_order_id: str) -> Optional[dict]:
+        return self.get_parent(client_order_id) or self.get_child(client_order_id)
+
+    def get_sibling(self, child_id: str) -> Optional[dict]:
+        row = self.get_child(child_id)
+        if row is None or row["linked_child_id"] is None:
             return None
-        return self.get(row["linked_order_id"])
+        return self.get_child(row["linked_child_id"])
 
-    def by_status(self, *statuses: str) -> list[sqlite3.Row]:
+    def parents_by_entry_status(self, *statuses: str) -> list[dict]:
         placeholders = ", ".join("?" for _ in statuses)
-        return self.conn.execute(
-            f"SELECT * FROM orders WHERE status IN ({placeholders}) ORDER BY created",
+        rows = self.conn.execute(
+            f"SELECT * FROM parent WHERE entry_status IN ({placeholders}) ORDER BY created",
             statuses,
         ).fetchall()
+        return [dict(row) for row in rows]
+
+    def parents_by_close_status(self, *statuses: str) -> list[dict]:
+        placeholders = ", ".join("?" for _ in statuses)
+        rows = self.conn.execute(
+            f"SELECT * FROM parent WHERE close_status IN ({placeholders}) ORDER BY created",
+            statuses,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def children_by_status(self, *statuses: str) -> list[dict]:
+        placeholders = ", ".join("?" for _ in statuses)
+        rows = self.conn.execute(
+            f"SELECT * FROM child WHERE status IN ({placeholders}) ORDER BY created",
+            statuses,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def children_by_parent(self, parent_id: str) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM child WHERE parent_id = ? ORDER BY created", (parent_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def parents_by_status(self, *statuses: str) -> list[dict]:
+        placeholders = ", ".join("?" for _ in statuses)
+        rows = self.conn.execute(
+            f"SELECT * FROM parent WHERE status IN ({placeholders}) ORDER BY created",
+            statuses,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_parent_closed(self, parent_id: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE parent SET status = 'CLOSED', modified = ? WHERE parent_id = ?",
+                (utc_now(), parent_id),
+            )
