@@ -28,6 +28,7 @@ Each run: parse required `--asset` → `STATE`/key checks → `Trade.sync_orders
 - `src/db.py` — `OrderDB` for entry parents, protective children, and parent close details.
 - `src/risk.py` — tracks losses, atomically claims signals, gates trades, and handles reversals/protection.
 - `src/strategy.py` — generates MACD crossover signals confirmed by Parabolic SAR; it does not execute trades.
+- `src/market_data/` — free Binance/Coinbase/Yahoo Finance/CoinMarketCap data clients, one file per source plus `bar.py` (shared `Bar` type) and `client.py` (`MarketDataClient` dispatcher); alternative/supplement to Alpaca's feeds, not yet wired into `strategy.py`.
 - `src/trade.py` — Alpaca trading/data wrapper; records entries on parents and protective exits on children.
 - `src/start.py` — checks `--asset`, `STATE`, and credentials, syncs orders, then routes that asset's signals through risk.
 - `.env` — credentials, `STATE`, wager/risk, and logging settings; gitignored.

@@ -27,6 +27,8 @@ with open(SRC_DIR / "config.json", encoding="utf-8") as f:
 
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
+# Only required for CoinMarketCapClient; Binance, Coinbase, and Yahoo Finance need no key.
+COINMARKETCAP_API_KEY = os.getenv("COINMARKETCAP_API_KEY", "")
 DEMO = os.getenv("DEMO", "true").lower() == "true"
 # Trading API base URL, e.g. https://paper-api.alpaca.markets or https://api.alpaca.markets.
 BASE_URL = os.getenv("ALPACA_BASE_URL", "")
