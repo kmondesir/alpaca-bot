@@ -19,9 +19,20 @@ from trade import Trade
 logger = logging.getLogger(__name__)
 
 
+def _parse_assets(value: str) -> tuple[str, ...]:
+    assets = tuple(dict.fromkeys(normalize_symbol(item) for item in value.split(",") if item.strip()))
+    if not assets:
+        raise argparse.ArgumentTypeError("expected at least one asset")
+    return assets
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Inspect account state or run Alpaca trading actions.")
-    parser.add_argument("--asset", help="required asset for a scheduled strategy run")
+    parser.add_argument(
+        "--assets",
+        type=_parse_assets,
+        help="required comma-separated assets for a scheduled strategy run, e.g. SPY,AAPL,BTC/USD",
+    )
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("get_balance", help="show account balances")
     commands.add_parser("get_positions", help="show open positions")
@@ -118,8 +129,8 @@ def _run_command(args, trade: Trade, db: OrderDB) -> None:
 def main(argv: Optional[list[str]] = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    if args.command is None and not args.asset:
-        parser.error("--asset is required when running the scheduled strategy")
+    if args.command is None and not args.assets:
+        parser.error("--assets is required when running the scheduled strategy")
     if args.command is None and not config.STATE:
         logger.info("STATE is off; exiting without running")
         return
@@ -138,10 +149,9 @@ def main(argv: Optional[list[str]] = None) -> None:
     trade = Trade(config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY, config.BASE_URL, db)
     if args.command is None:
         trade.sync_orders()
-        asset = normalize_symbol(args.asset)
-        signals = MacdPsarStrategy(trade.stock_data, (asset,)).generate_signals()
+        signals = MacdPsarStrategy(trade.stock_data, args.assets).generate_signals()
         if not signals:
-            logger.info("No strategy signal for %s this run", asset)
+            logger.info("No strategy signal for %s this run", ", ".join(args.assets))
         risk.process_strategy_signals(trade, signals)
     else:
         _run_command(args, trade, db)
