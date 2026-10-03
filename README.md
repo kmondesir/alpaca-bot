@@ -140,7 +140,10 @@ python src/start.py close_position AAPL
 ```
 
 For the scheduled strategy, pass one or more comma-separated assets without a
-subcommand. Stocks use Alpaca's IEX feed; crypto pairs use crypto bars. `BTC` is
+subcommand. Stocks use Alpaca's IEX feed; crypto pairs use crypto bars. A bare
+name that Alpaca also trades as a USD crypto pair (for example `ETH`) is
+converted to that pair with a warning, so write `NAME/USD` for crypto. Assets
+Alpaca doesn't list as tradable are skipped with an error. `BTC` is
 accepted as an alias for `BTC/USD`:
 
 ```bash
