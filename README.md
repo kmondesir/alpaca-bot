@@ -164,8 +164,11 @@ Alpaca's IEX feed. It only
 returns signals; `start.py` sends them to `risk.py`, which requires `STATE=true`,
 prevents duplicate entries, applies `WAGER`, and handles protective exits and
 tracked reversals. Crypto runs 24/7, is long-only, and uses GTC orders. The
-configured `TRAILING_STOP_LOSS` fraction becomes a fixed stop-limit for crypto;
-crypto position sizing uses non-marginable buying power. As with all stop-limit
+configured `TRAILING_STOP_LOSS` fraction becomes a stop-limit for crypto, since
+Alpaca has no crypto trailing-stop order; each run raises it to that fraction
+below the current bid once it can move by a tenth of the trail distance, and
+never lowers it. Because the bot moves the stop once per run, it trails the
+price at the run interval, not tick by tick. Crypto position sizing uses non-marginable buying power. As with all stop-limit
 orders, a fast price gap can prevent execution.
 
 Set `STATE=true` in `.env` and provide one or more assets, then:

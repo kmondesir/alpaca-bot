@@ -23,6 +23,7 @@ from alpaca.trading.requests import (
     ClosePositionRequest,
     LimitOrderRequest,
     MarketOrderRequest,
+    ReplaceOrderRequest,
     StopLimitOrderRequest,
     TrailingStopOrderRequest,
 )
@@ -63,6 +64,11 @@ def _db_status(order) -> str:
     if order.status in (OrderStatus.CANCELED, OrderStatus.REJECTED, OrderStatus.REPLACED):
         return "CANCELLED"
     return "PARTIAL" if _filled(order) > 0 else "SUBMITTED"
+
+
+# Raise a crypto stop only after it can move by this fraction of the trail
+# distance, so a rising price doesn't replace the order on every run.
+_TRAIL_MIN_STEP = 0.1
 
 
 def _round_to_increment(price: float, increment: float) -> float:
@@ -472,7 +478,7 @@ class Trade:
                     stop_price=stop_price,
                     time_in_force="gtc",
                     client_order_id=trailing_stop_id,
-                    description=description or f"fixed stop-limit for {symbol}",
+                    description=description or f"trailing stop-limit for {symbol}",
                     parent_id=parent_id,
                     child_role="trailing_stop",
                 )
@@ -516,6 +522,84 @@ class Trade:
             if order is not None and _db_status(order) == "FILLED":
                 self._finalize_child(order.client_order_id, "FILLED", "NA")
         return take_profit, trailing_stop
+
+    def trail_crypto_stops(self) -> None:
+        """Raise working crypto stop-limits to follow the price up.
+
+        Alpaca has no trailing-stop order type for crypto, so each run moves the
+        stop to TRAILING_STOP_LOSS below the current bid when that is higher than
+        the working stop. Stops are never lowered; a failed replace leaves the
+        existing stop in place.
+        """
+        if config.TRAILING_STOP_LOSS <= 0:
+            return
+        for row in self.db.children_by_status(*PENDING_STATUSES):
+            if row["role"] != "trailing_stop" or row["order_type"] != "stop_limit":
+                continue
+            try:
+                self._trail_crypto_stop(row)
+            except Exception:
+                logger.exception("Could not trail stop %s", row["child_id"])
+
+    def _trail_crypto_stop(self, row: dict) -> None:
+        child_id = row["child_id"]
+        symbol = normalize_symbol(self.db.get_parent(row["parent_id"])["symbol"])
+        if not is_crypto_symbol(symbol):
+            return
+        order = self.client.get_order_by_client_id(child_id)
+        # Alpaca rejects replacing accepted, pending_new, or pending_* orders.
+        if order.status != OrderStatus.NEW or order.stop_price is None:
+            return
+
+        price_increment = float(self.client.get_asset(symbol).price_increment or 0.01)
+        quote = self.crypto_data.get_crypto_latest_quote(
+            CryptoLatestQuoteRequest(symbol_or_symbols=symbol)
+        )[symbol]
+        bid = float(quote.bid_price or 0)
+        if bid <= 0:
+            return
+        current_stop = float(order.stop_price)
+        new_stop = _round_to_increment(bid * (1 - config.TRAILING_STOP_LOSS), price_increment)
+        min_step = max(bid * config.TRAILING_STOP_LOSS * _TRAIL_MIN_STEP, price_increment)
+        if new_stop - current_stop < min_step:
+            return
+
+        new_id = config.new_client_order_id()
+        limit_price = _round_to_increment(new_stop - price_increment, price_increment)
+        replacement = self.client.replace_order_by_id(
+            order.id,
+            ReplaceOrderRequest(
+                stop_price=new_stop, limit_price=limit_price, client_order_id=new_id
+            ),
+        )
+        description = f"trailing stop-limit for {symbol}"
+        self.db.save_child_order(
+            child_id,
+            "CANCELLED",
+            f"replaced by {new_id}",
+            row["costs"] or 0,
+            row["side"],
+            row["quantity"],
+            row["order_type"],
+            row["basis"],
+        )
+        self._record_child(replacement, description, row["parent_id"], "trailing_stop")
+        self.db.save_child_order(
+            new_id,
+            _db_status(replacement),
+            description,
+            _costs(replacement),
+            replacement.side.value,
+            float(replacement.qty) if replacement.qty is not None else None,
+            replacement.order_type.value,
+            row["basis"],
+        )
+        if row["linked_child_id"]:
+            self.db.link_children(row["linked_child_id"], new_id, row["basis"])
+        logger.info(
+            "Raised %s stop from %s to %s (bid %s): %s -> %s",
+            symbol, current_stop, new_stop, bid, child_id, new_id,
+        )
 
     def close_order(self, client_order_id: str):
         """Close a parent position and retain the close order details on it."""
