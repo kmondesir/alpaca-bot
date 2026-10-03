@@ -8,12 +8,14 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from alpaca.common.exceptions import APIError
+from alpaca.trading.enums import AssetClass, AssetStatus
+from alpaca.trading.requests import GetAssetsRequest
 
 import config
 import risk
 from db import OrderDB
 from strategy import MacdPsarStrategy, Signal
-from symbols import normalize_symbol
+from symbols import is_crypto_symbol, normalize_symbol
 from trade import Trade
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,49 @@ def _parse_assets(value: str) -> tuple[str, ...]:
     if not assets:
         raise argparse.ArgumentTypeError("expected at least one asset")
     return assets
+
+
+def _resolve_assets(trade: Trade, assets: tuple[str, ...]) -> tuple[str, ...]:
+    """Convert bare crypto names to USD pairs and drop assets Alpaca can't trade.
+
+    Without the slash a name is treated as a stock ticker, and several crypto
+    names are also listed stocks or ETFs (ETH, XRP). A bare name becomes
+    NAME/USD when Alpaca trades that crypto pair. Any remaining stock ticker
+    that Alpaca doesn't list as tradable is skipped with an error.
+    """
+    if all(is_crypto_symbol(asset) for asset in assets):
+        return assets
+    pairs = {
+        normalize_symbol(asset.symbol)
+        for asset in trade.client.get_all_assets(
+            GetAssetsRequest(asset_class=AssetClass.CRYPTO, status=AssetStatus.ACTIVE)
+        )
+        if asset.tradable
+    }
+    resolved = []
+    for asset in assets:
+        pair = f"{asset}/USD"
+        if not is_crypto_symbol(asset) and pair in pairs:
+            logger.warning("Treating %s as crypto %s; pass %s in --assets to silence this", asset, pair, pair)
+            asset = pair
+        elif not is_crypto_symbol(asset) and not _tradable_stock(trade, asset):
+            continue
+        resolved.append(asset)
+    return tuple(dict.fromkeys(resolved))
+
+
+def _tradable_stock(trade: Trade, symbol: str) -> bool:
+    try:
+        asset = trade.client.get_asset(symbol)
+    except APIError as error:
+        if error.status_code != 404:
+            raise
+        logger.error("Skipping %s: Alpaca has no stock or crypto pair by that name", symbol)
+        return False
+    if not asset.tradable:
+        logger.error("Skipping %s: Alpaca lists %s as not tradable", symbol, asset.name)
+        return False
+    return True
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -150,9 +195,17 @@ def main(argv: Optional[list[str]] = None) -> None:
     if args.command is None:
         trade.manage_crypto_stops()
         trade.sync_orders()
-        signals = MacdPsarStrategy(trade.stock_data, args.assets).generate_signals()
+        try:
+            assets = _resolve_assets(trade, args.assets)
+        except APIError as error:
+            logger.error("Could not check --assets against Alpaca; skipping strategy: %s", error)
+            return
+        if not assets:
+            logger.error("No tradable assets left in --assets; skipping strategy")
+            return
+        signals = MacdPsarStrategy(trade.stock_data, assets).generate_signals()
         if not signals:
-            logger.info("No strategy signal for %s this run", ", ".join(args.assets))
+            logger.info("No strategy signal for %s this run", ", ".join(assets))
         risk.process_strategy_signals(trade, signals)
     else:
         _run_command(args, trade, db)
