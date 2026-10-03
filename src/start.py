@@ -149,6 +149,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     trade = Trade(config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY, config.BASE_URL, db)
     if args.command is None:
         trade.sync_orders()
+        trade.trail_crypto_stops()
         signals = MacdPsarStrategy(trade.stock_data, args.assets).generate_signals()
         if not signals:
             logger.info("No strategy signal for %s this run", ", ".join(args.assets))
