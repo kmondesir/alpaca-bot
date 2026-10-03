@@ -194,7 +194,7 @@ def _position_symbol(position) -> str:
     return normalize_symbol(position.symbol)
 
 
-def _available_quantity(trade, symbol: str) -> float:
+def available_quantity(trade, symbol: str) -> float:
     """Return the held quantity not already reserved by open orders.
 
     Alpaca deducts crypto fees from the purchased asset, so the held quantity
@@ -226,7 +226,7 @@ def _protect_strategy_entry(trade, entry: dict) -> None:
     average_price = float(order.filled_avg_price or 0)
     if additional_quantity > 0 and average_price > 0:
         if is_crypto_symbol(symbol):
-            available_quantity = _available_quantity(trade, symbol)
+            available_quantity = available_quantity(trade, symbol)
             if available_quantity < additional_quantity:
                 logger.info(
                     "Protecting %s of %s filled %s; the rest went to fees or is already reserved",
