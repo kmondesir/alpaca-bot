@@ -12,12 +12,12 @@ from contextlib import closing
 from typing import Optional
 
 from alpaca.common.exceptions import APIError
-from alpaca.trading.enums import OrderStatus, QueryOrderStatus
+from alpaca.trading.enums import AssetClass, OrderStatus, QueryOrderStatus
 from alpaca.trading.requests import GetOrdersRequest
 from dotenv import set_key
 
 import config
-from symbols import is_crypto_symbol, normalize_symbol
+from symbols import crypto_pair, is_crypto_symbol, normalize_symbol
 from db import utc_now
 
 logger = logging.getLogger(__name__)
@@ -187,15 +187,22 @@ _TERMINAL_STATUSES = {
 }
 
 
+def _position_symbol(position) -> str:
+    """Alpaca reports crypto positions without the slash used everywhere else."""
+    if position.asset_class == AssetClass.CRYPTO:
+        return crypto_pair(position.symbol)
+    return normalize_symbol(position.symbol)
+
+
 def _available_quantity(trade, symbol: str) -> float:
     """Return the held quantity not already reserved by open orders.
 
     Alpaca deducts crypto fees from the purchased asset, so the held quantity
     can be smaller than the entry order's filled_qty.
     """
-    target = normalize_symbol(symbol).replace("/", "")
+    target = normalize_symbol(symbol)
     for position in trade.client.get_all_positions():
-        if normalize_symbol(position.symbol).replace("/", "") == target:
+        if _position_symbol(position) == target:
             return float(position.qty_available or 0)
     return 0.0
 
@@ -286,7 +293,7 @@ def _loss_limit_reached() -> bool:
 
 def _occupied_symbols(trade) -> tuple[dict, set[str]]:
     positions = {
-        normalize_symbol(position.symbol): position
+        _position_symbol(position): position
         for position in trade.client.get_all_positions()
     }
     pending_orders = trade.client.get_orders(
