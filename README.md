@@ -168,8 +168,10 @@ configured `TRAILING_STOP_LOSS` fraction becomes a stop-limit for crypto, since
 Alpaca has no crypto trailing-stop order; each run raises it to that fraction
 below the current bid once it can move by a tenth of the trail distance, and
 never lowers it. Because the bot moves the stop once per run, it trails the
-price at the run interval, not tick by tick. Crypto position sizing uses non-marginable buying power. As with all stop-limit
-orders, a fast price gap can prevent execution.
+price at the run interval, not tick by tick. A fast drop can trigger a
+stop-limit without filling it, so when a run finds the bid at or below a stop
+that has not filled, it cancels the stop and sells the remainder at market.
+Crypto position sizing uses non-marginable buying power.
 
 Set `STATE=true` in `.env` and provide one or more assets, then:
 

@@ -6,6 +6,7 @@ so later cron runs can reconcile their status.
 
 import logging
 import math
+import time
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
@@ -30,7 +31,7 @@ from alpaca.trading.requests import (
 
 import config
 import risk
-from db import PENDING_STATUSES, OrderDB
+from db import PENDING_STATUSES, STATUSES, OrderDB
 from symbols import is_crypto_symbol, normalize_symbol
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,12 @@ def _db_status(order) -> str:
 # Raise a crypto stop only after it can move by this fraction of the trail
 # distance, so a rising price doesn't replace the order on every run.
 _TRAIL_MIN_STEP = 0.1
+
+# A stop marked with this note is being cancelled so its remainder can be sold
+# at market; the note lets a later run finish the sale if the cancel lags.
+_MARKET_FALLBACK_NOTE = "cancelling stop for market sell"
+# How long to wait for Alpaca to confirm a cancel before deferring to next run.
+_CANCEL_WAIT_SECONDS = 10.0
 
 
 def _round_to_increment(price: float, increment: float) -> float:
@@ -523,42 +530,59 @@ class Trade:
                 self._finalize_child(order.client_order_id, "FILLED", "NA")
         return take_profit, trailing_stop
 
-    def trail_crypto_stops(self) -> None:
-        """Raise working crypto stop-limits to follow the price up.
+    def manage_crypto_stops(self) -> None:
+        """Trail working crypto stop-limits, and sell at market when one gaps.
 
         Alpaca has no trailing-stop order type for crypto, so each run moves the
         stop to TRAILING_STOP_LOSS below the current bid when that is higher than
         the working stop. Stops are never lowered; a failed replace leaves the
         existing stop in place.
+
+        A stop-limit only sells at or above its limit price, so a fast drop can
+        trigger it without filling. When the bid is at or below the stop and the
+        order is still unfilled, the stop is cancelled and the remainder is sold
+        at market. Run this before sync_orders() so a cancel that is still
+        pending is resumed on the next run instead of being recorded as a
+        plain cancellation.
         """
         if config.TRAILING_STOP_LOSS <= 0:
             return
-        for row in self.db.children_by_status(*PENDING_STATUSES):
+        for row in self.db.children_by_status(*STATUSES):
             if row["role"] != "trailing_stop" or row["order_type"] != "stop_limit":
                 continue
+            # A noted row may already be marked CANCELLED if its cancel landed
+            # after the last run's wait; it still needs its market sell.
+            if row["status"] not in PENDING_STATUSES and row["description"] != _MARKET_FALLBACK_NOTE:
+                continue
             try:
-                self._trail_crypto_stop(row)
+                self._manage_crypto_stop(row)
             except Exception:
-                logger.exception("Could not trail stop %s", row["child_id"])
+                logger.exception("Could not manage stop %s", row["child_id"])
 
-    def _trail_crypto_stop(self, row: dict) -> None:
+    def _manage_crypto_stop(self, row: dict) -> None:
         child_id = row["child_id"]
         symbol = normalize_symbol(self.db.get_parent(row["parent_id"])["symbol"])
         if not is_crypto_symbol(symbol):
             return
         order = self.client.get_order_by_client_id(child_id)
-        # Alpaca rejects replacing accepted, pending_new, or pending_* orders.
-        if order.status != OrderStatus.NEW or order.stop_price is None:
+        if row["description"] == _MARKET_FALLBACK_NOTE:
+            self._finish_market_fallback(row, symbol, order)
+            return
+        if order.status in _DONE_STATUSES or order.stop_price is None:
             return
 
-        price_increment = float(self.client.get_asset(symbol).price_increment or 0.01)
-        quote = self.crypto_data.get_crypto_latest_quote(
-            CryptoLatestQuoteRequest(symbol_or_symbols=symbol)
-        )[symbol]
-        bid = float(quote.bid_price or 0)
+        bid = self._crypto_bid(symbol)
         if bid <= 0:
             return
         current_stop = float(order.stop_price)
+        if bid <= current_stop:
+            self._start_market_fallback(row, symbol, order, bid)
+            return
+        # Alpaca rejects replacing accepted, pending_new, or pending_* orders.
+        if order.status != OrderStatus.NEW:
+            return
+
+        price_increment = float(self.client.get_asset(symbol).price_increment or 0.01)
         new_stop = _round_to_increment(bid * (1 - config.TRAILING_STOP_LOSS), price_increment)
         min_step = max(bid * config.TRAILING_STOP_LOSS * _TRAIL_MIN_STEP, price_increment)
         if new_stop - current_stop < min_step:
@@ -572,9 +596,110 @@ class Trade:
                 stop_price=new_stop, limit_price=limit_price, client_order_id=new_id
             ),
         )
-        description = f"trailing stop-limit for {symbol}"
+        self._replace_child_row(row, new_id, replacement, f"trailing stop-limit for {symbol}")
+        logger.info(
+            "Raised %s stop from %s to %s (bid %s): %s -> %s",
+            symbol, current_stop, new_stop, bid, child_id, new_id,
+        )
+
+    def _crypto_bid(self, symbol: str) -> float:
+        quote = self.crypto_data.get_crypto_latest_quote(
+            CryptoLatestQuoteRequest(symbol_or_symbols=symbol)
+        )[symbol]
+        return float(quote.bid_price or 0)
+
+    def _start_market_fallback(self, row: dict, symbol: str, order, bid: float) -> None:
+        """Cancel a stop the price has passed so its remainder can sell at market."""
+        logger.warning(
+            "%s bid %s is at or below stop %s and %s has not filled; cancelling for a market sell",
+            symbol, bid, order.stop_price, row["child_id"],
+        )
+        # Note the intent first so a cancel that finishes after this run still
+        # ends in a market sell rather than an unprotected position.
         self.db.save_child_order(
-            child_id,
+            row["child_id"], row["status"], _MARKET_FALLBACK_NOTE, row["costs"] or 0,
+            row["side"], row["quantity"], row["order_type"], row["basis"],
+        )
+        row = self.db.get_child(row["child_id"])
+        try:
+            self.client.cancel_order_by_id(order.id)
+        except APIError as error:
+            logger.warning("Could not cancel %s: %s", row["child_id"], error)
+        sibling = self.db.get_sibling(row["child_id"])
+        if sibling is not None and sibling["status"] in PENDING_STATUSES:
+            try:
+                self.cancel_order(sibling["child_id"])
+            except APIError as error:
+                logger.warning("Could not cancel sibling %s: %s", sibling["child_id"], error)
+        self._finish_market_fallback(row, symbol, self._wait_until_done(order.id))
+
+    def _finish_market_fallback(self, row: dict, symbol: str, order) -> None:
+        child_id = row["child_id"]
+        if order.status == OrderStatus.FILLED:
+            # The stop filled before the cancel landed; sync_orders() records it.
+            self.db.save_child_order(
+                child_id, row["status"], f"trailing stop-limit for {symbol}", row["costs"] or 0,
+                row["side"], row["quantity"], row["order_type"], row["basis"],
+            )
+            return
+        if order.status not in _DONE_STATUSES:
+            logger.info("Cancel of %s still pending; market sell will follow next run", child_id)
+            return
+
+        order_qty = float(order.qty or 0)
+        filled = _filled(order)
+        quantity = min(order_qty - filled, risk.available_quantity(self, symbol))
+        if quantity <= 0:
+            self._record_child(order, f"stop cancelled; no {symbol} left to sell")
+            logger.warning("Cancelled %s but no %s is available to sell", child_id, symbol)
+            return
+        if filled > 0:
+            logger.warning(
+                "%s partly filled %s before the market sell; that portion's P&L is not recorded",
+                child_id, filled,
+            )
+        basis = None
+        if row["basis"] is not None and order_qty > 0:
+            basis = row["basis"] * quantity / order_qty
+        new_id = config.new_client_order_id()
+        market = self.place_order(
+            symbol,
+            OrderSide.SELL.value,
+            qty=quantity,
+            time_in_force="gtc",
+            client_order_id=new_id,
+            description=f"market sell after stop gap for {symbol}",
+            parent_id=row["parent_id"],
+            child_role="trailing_stop",
+        )
+        self._record_child(order, f"stop gapped; replaced by market sell {new_id}")
+        self.db.save_child_order(
+            new_id,
+            _db_status(market),
+            None,
+            _costs(market),
+            market.side.value,
+            float(market.qty) if market.qty is not None else None,
+            market.order_type.value,
+            basis,
+        )
+        logger.warning("Sold %s %s at market after stop %s did not fill", quantity, symbol, child_id)
+        if _db_status(market) == "FILLED":
+            self._finalize_child(new_id, "FILLED", "NA")
+
+    def _wait_until_done(self, order_id, timeout: float = None):
+        """Poll an order until Alpaca reports a final status or the timeout passes."""
+        deadline = time.monotonic() + (_CANCEL_WAIT_SECONDS if timeout is None else timeout)
+        while True:
+            order = self.client.get_order_by_id(order_id)
+            if order.status in _DONE_STATUSES or time.monotonic() >= deadline:
+                return order
+            time.sleep(0.5)
+
+    def _replace_child_row(self, row: dict, new_id: str, replacement, description: str) -> None:
+        """Retire a replaced child row and record its replacement under the same parent."""
+        self.db.save_child_order(
+            row["child_id"],
             "CANCELLED",
             f"replaced by {new_id}",
             row["costs"] or 0,
@@ -596,10 +721,6 @@ class Trade:
         )
         if row["linked_child_id"]:
             self.db.link_children(row["linked_child_id"], new_id, row["basis"])
-        logger.info(
-            "Raised %s stop from %s to %s (bid %s): %s -> %s",
-            symbol, current_stop, new_stop, bid, child_id, new_id,
-        )
 
     def close_order(self, client_order_id: str):
         """Close a parent position and retain the close order details on it."""
