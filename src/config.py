@@ -50,8 +50,8 @@ DB_PATH = ROOT_DIR / os.getenv("DB_PATH", "data/alpaca.db")
 WAGER = float(os.getenv("WAGER", "0.04"))
 # TAKE_PROFIT: fraction above the fill price at which the take-profit sell exits.
 TAKE_PROFIT = float(os.getenv("TAKE_PROFIT", "0.5"))
-# TRAILING_STOP_LOSS: fraction below the running high-water mark that triggers the trailing stop.
-TRAILING_STOP_LOSS = float(os.getenv("TRAILING_STOP_LOSS", "0.05"))
+# STOP_LOSS: fraction below the running high-water mark that triggers the stop-loss.
+STOP_LOSS = float(os.getenv("STOP_LOSS", "0.05"))
 # MAX_CONSECUTIVE_LOSSES: after this many losing trades in a row, STATE is switched off.
 MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSS", "5"))
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))

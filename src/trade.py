@@ -523,13 +523,13 @@ class Trade:
                 child_role="take_profit",
             )
         # Alpaca has no trailing stops for options; risk.py enforces OPTION_STOP_LOSS instead.
-        if config.TRAILING_STOP_LOSS > 0 and not option:
+        if config.STOP_LOSS > 0 and not option:
             trailing_stop_id = config.new_client_order_id()
             if crypto:
-                if config.TRAILING_STOP_LOSS >= 1:
-                    raise ValueError("TRAILING_STOP_LOSS must be less than 1 for crypto")
+                if config.STOP_LOSS >= 1:
+                    raise ValueError("STOP_LOSS must be less than 1 for crypto")
                 stop_price = _round_to_increment(
-                    avg_price * (1 - config.TRAILING_STOP_LOSS), price_increment
+                    avg_price * (1 - config.STOP_LOSS), price_increment
                 )
                 limit_price = _round_to_increment(stop_price - price_increment, price_increment)
                 if stop_price <= 0 or limit_price <= 0:
@@ -551,7 +551,7 @@ class Trade:
                     symbol,
                     exit_side.value,
                     qty=qty,
-                    trail_percent=config.TRAILING_STOP_LOSS * 100,
+                    trail_percent=config.STOP_LOSS * 100,
                     client_order_id=trailing_stop_id,
                     description=description or f"trailing-stop for {symbol}",
                     parent_id=parent_id,
@@ -591,7 +591,7 @@ class Trade:
         """Trail working crypto stop-limits, and sell at market when one gaps.
 
         Alpaca has no trailing-stop order type for crypto, so each run moves the
-        stop to TRAILING_STOP_LOSS below the current bid when that is higher than
+        stop to STOP_LOSS below the current bid when that is higher than
         the working stop. Stops are never lowered; a failed replace leaves the
         existing stop in place.
 
@@ -602,7 +602,7 @@ class Trade:
         pending is resumed on the next run instead of being recorded as a
         plain cancellation.
         """
-        if config.TRAILING_STOP_LOSS <= 0:
+        if config.STOP_LOSS <= 0:
             return
         for row in self.db.children_by_status(*STATUSES):
             if row["role"] != "trailing_stop" or row["order_type"] != "stop_limit":
@@ -640,8 +640,8 @@ class Trade:
             return
 
         price_increment = float(self.client.get_asset(symbol).price_increment or 0.01)
-        new_stop = _round_to_increment(bid * (1 - config.TRAILING_STOP_LOSS), price_increment)
-        min_step = max(bid * config.TRAILING_STOP_LOSS * _TRAIL_MIN_STEP, price_increment)
+        new_stop = _round_to_increment(bid * (1 - config.STOP_LOSS), price_increment)
+        min_step = max(bid * config.STOP_LOSS * _TRAIL_MIN_STEP, price_increment)
         if new_stop - current_stop < min_step:
             return
 

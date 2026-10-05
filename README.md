@@ -34,7 +34,7 @@ DB_PATH=data/alpaca.db
 
 WAGER=0.04
 TAKE_PROFIT=0.5
-TRAILING_STOP_LOSS=0.05
+STOP_LOSS=0.05
 MAX_CONSECUTIVE_LOSS=5
 MAX_OPEN_POSITIONS=3
 LOSS_DIRECTORY=status
@@ -61,7 +61,7 @@ OPTION_FLATTEN_TIME=15:45
 | `DB_PATH`              | `data/alpaca.db` | SQLite order-tracking database, relative to the project root. Created if missing.                                               |
 | `WAGER`                | `0.04`           | Fraction of account buying power used for a new position. For example, `0.04` sizes a position at 4% of buying power.           |
 | `TAKE_PROFIT`          | `0.5`            | Fraction above the purchase price for the take-profit exit. For example, `0.5` targets 50% above entry; `0` disables it.        |
-| `TRAILING_STOP_LOSS`   | `0.05`           | Fraction the trailing stop follows below the running high price. For example, `0.05` trails by 5%; `0` disables it.             |
+| `STOP_LOSS`            | `0.05`           | Fraction the trailing stop follows below the running high price. For example, `0.05` trails by 5%; `0` disables it.             |
 | `MAX_CONSECUTIVE_LOSS` | `5`              | Consecutive losing trades allowed before the bot sets `STATE=false` in `.env`; `0` disables this kill switch.                   |
 | `MAX_OPEN_POSITIONS`   | `3`              | Maximum number of distinct open positions. Pending orders reserve a slot; additional orders for an existing symbol are allowed. |
 | `LOSS_DIRECTORY`       | `status`         | Directory, relative to the project root, for `losses.json`, which stores loss history and the consecutive-loss count.           |
@@ -197,7 +197,7 @@ Alpaca's IEX feed. It only
 returns signals; `start.py` sends them to `risk.py`, which requires `STATE=true`,
 prevents duplicate entries, applies `WAGER`, and handles protective exits and
 tracked reversals. Crypto runs 24/7, is long-only, and uses GTC orders. The
-configured `TRAILING_STOP_LOSS` fraction becomes a stop-limit for crypto, since
+configured `STOP_LOSS` fraction becomes a stop-limit for crypto, since
 Alpaca has no crypto trailing-stop order; each run raises it to that fraction
 below the current bid once it can move by a tenth of the trail distance, and
 never lowers it. Because the bot moves the stop once per run, it trails the
@@ -234,7 +234,7 @@ waits for a new signal before reversing.
 Exits:
 
 - a `TAKE_PROFIT` limit sell (Alpaca has no trailing stops for options, so
-  `TRAILING_STOP_LOSS` is not used);
+  `STOP_LOSS` is not used);
 - `OPTION_STOP_LOSS`, checked on each run against the position's unrealized
   loss;
 - every option expiring that day is closed at `OPTION_FLATTEN_TIME`.
