@@ -318,6 +318,25 @@ def _manage_option_positions(trade) -> None:
             logger.warning("Could not close option %s; retrying next run: %s", row["parent_id"], error)
 
 
+def in_trading_window(now: Optional[datetime] = None) -> bool:
+    """Whether new entries are allowed by TRADING_START/TRADING_STOP (US/Eastern)."""
+    start, stop = config.TRADING_START, config.TRADING_STOP
+    current = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ).time()
+    if start is not None and stop is not None and start > stop:
+        return current >= start or current < stop
+    if start is not None and current < start:
+        return False
+    if stop is not None and current >= stop:
+        return False
+    return True
+
+
+def _log_outside_window(symbol: str) -> None:
+    start = config.TRADING_START.strftime("%H:%M") if config.TRADING_START else "any time"
+    stop = config.TRADING_STOP.strftime("%H:%M") if config.TRADING_STOP else "any time"
+    logger.info("Outside trading window (%s to %s ET); blocking new entry for %s", start, stop, symbol)
+
+
 def _loss_limit_reached() -> bool:
     limit = config.MAX_CONSECUTIVE_LOSSES
     if limit <= 0:
@@ -377,6 +396,7 @@ def process_strategy_signals(trade, signals: list) -> list:
         return []
     positions, occupied_symbols = _occupied_symbols(trade)
     submitted_orders = []
+    entries_allowed = in_trading_window()
     active_statuses = {"NA", "SUBMITTED", "PARTIAL", "FILLED", "OPEN", "CLOSING"}
 
     for signal in signals:
@@ -421,6 +441,10 @@ def process_strategy_signals(trade, signals: list) -> list:
                         config.MAX_OPEN_POSITIONS,
                         symbol,
                     )
+                    ignore_strategy_signal(client_order_id)
+                    continue
+                if not entries_allowed:
+                    _log_outside_window(symbol)
                     ignore_strategy_signal(client_order_id)
                     continue
 
@@ -494,6 +518,10 @@ def process_strategy_signals(trade, signals: list) -> list:
                     config.MAX_OPEN_POSITIONS,
                     symbol,
                 )
+                ignore_strategy_signal(client_order_id)
+                continue
+            if not entries_allowed:
+                _log_outside_window(symbol)
                 ignore_strategy_signal(client_order_id)
                 continue
 

@@ -12,8 +12,10 @@ import socket
 import sys
 import time
 import uuid
+from datetime import time as clock_time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -57,6 +59,24 @@ MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
 OPTION_STOP_LOSS = float(os.getenv("OPTION_STOP_LOSS", "0.5"))
 # OPTION_FLATTEN_TIME: US/Eastern HH:MM after which same-day-expiry options are closed.
 OPTION_FLATTEN_TIME = os.getenv("OPTION_FLATTEN_TIME", "15:45")
+
+
+def _window_time(name: str) -> Optional[clock_time]:
+    """Parse a US/Eastern HH:MM setting; 0 or blank disables it."""
+    value = os.getenv(name, "0").strip()
+    if value in ("", "0"):
+        return None
+    try:
+        hour, minute = (int(part) for part in value.split(":"))
+        return clock_time(hour, minute)
+    except ValueError:
+        raise ValueError(f"{name} must be HH:MM (US/Eastern) or 0 to disable, not {value!r}") from None
+
+
+# Trading window for new entries, in US/Eastern. Either bound may be 0 to
+# disable it; a TRADING_START later than TRADING_STOP wraps past midnight.
+TRADING_START = _window_time("TRADING_START")
+TRADING_STOP = _window_time("TRADING_STOP")
 
 # Relative LOSS_DIRECTORY paths resolve from the project root.
 LOSS_DIRECTORY = ROOT_DIR / os.getenv("LOSS_DIRECTORY", "status")
