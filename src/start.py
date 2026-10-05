@@ -12,7 +12,7 @@ from alpaca.common.exceptions import APIError
 import config
 import risk
 from db import OrderDB
-from strategy import MacdPsarStrategy, Signal
+from strategies import DEFAULT_STRATEGY, STRATEGIES, Signal, build_strategy
 from symbols import normalize_symbol
 from trade import Trade
 
@@ -32,6 +32,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--assets",
         type=_parse_assets,
         help="required comma-separated assets for a scheduled strategy run, e.g. SPY,AAPL,BTC/USD",
+    )
+    parser.add_argument(
+        "--strategy",
+        choices=sorted(STRATEGIES),
+        default=DEFAULT_STRATEGY,
+        help=f"strategy for a scheduled run (default: {DEFAULT_STRATEGY})",
     )
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("get_balance", help="show account balances")
@@ -149,9 +155,9 @@ def main(argv: Optional[list[str]] = None) -> None:
     trade = Trade(config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY, config.BASE_URL, db)
     if args.command is None:
         trade.sync_orders()
-        signals = MacdPsarStrategy(trade.stock_data, args.assets).generate_signals()
+        signals = build_strategy(args.strategy, trade, args.assets).generate_signals()
         if not signals:
-            logger.info("No strategy signal for %s this run", ", ".join(args.assets))
+            logger.info("No %s signal for %s this run", args.strategy, ", ".join(args.assets))
         risk.process_strategy_signals(trade, signals)
     else:
         _run_command(args, trade, db)
