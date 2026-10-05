@@ -7,7 +7,7 @@ so later cron runs can reconcile their status.
 import logging
 import math
 import time
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Optional
 
 from alpaca.common.exceptions import APIError
@@ -76,6 +76,11 @@ _TRAIL_MIN_STEP = 0.1
 _MARKET_FALLBACK_NOTE = "cancelling stop for market sell"
 # How long to wait for Alpaca to confirm a cancel before deferring to next run.
 _CANCEL_WAIT_SECONDS = 10.0
+
+
+def _round_notional(notional: float) -> float:
+    """Round a dollar amount down to whole cents, the most precision Alpaca accepts."""
+    return float(Decimal(str(notional)).quantize(Decimal("0.01"), rounding=ROUND_DOWN))
 
 
 def _round_to_increment(price: float, increment: float) -> float:
@@ -308,7 +313,8 @@ class Trade:
     ):
         """Submit a market, limit, or trailing-stop order.
 
-        Pass exactly one of qty (shares/units) or notional (dollar amount).
+        Pass exactly one of qty (shares/units) or notional (dollar amount);
+        notional is rounded down to whole cents.
         side is "buy" or "sell"; time_in_force is e.g. "day", "gtc", "ioc".
         limit_price and trail_percent are mutually exclusive; with neither, a
         market order is submitted. trail_percent is a percent value (e.g. 5
@@ -318,6 +324,10 @@ class Trade:
         """
         if (qty is None) == (notional is None):
             raise ValueError("Pass exactly one of qty or notional")
+        if notional is not None:
+            notional = _round_notional(notional)
+            if notional <= 0:
+                raise ValueError("notional must be at least $0.01")
         symbol = normalize_symbol(symbol)
         if trail_percent is not None and (limit_price is not None or stop_price is not None):
             raise ValueError("A trailing stop cannot include limit_price or stop_price")
