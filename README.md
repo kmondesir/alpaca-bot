@@ -38,6 +38,8 @@ TRAILING_STOP_LOSS=0.05
 MAX_CONSECUTIVE_LOSS=5
 MAX_OPEN_POSITIONS=3
 LOSS_DIRECTORY=status
+TRADING_START=0
+TRADING_STOP=0
 
 OPTION_STOP_LOSS=0.5
 OPTION_FLATTEN_TIME=15:45
@@ -63,6 +65,8 @@ OPTION_FLATTEN_TIME=15:45
 | `MAX_CONSECUTIVE_LOSS` | `5`              | Consecutive losing trades allowed before the bot sets `STATE=false` in `.env`; `0` disables this kill switch.                   |
 | `MAX_OPEN_POSITIONS`   | `3`              | Maximum number of distinct open positions. Pending orders reserve a slot; additional orders for an existing symbol are allowed. |
 | `LOSS_DIRECTORY`       | `status`         | Directory, relative to the project root, for `losses.json`, which stores loss history and the consecutive-loss count.           |
+| `TRADING_START`        | `0`              | US/Eastern `HH:MM` before which no new entries are opened, e.g. `09:45`; `0` disables it.                                       |
+| `TRADING_STOP`         | `0`              | US/Eastern `HH:MM` from which no new entries are opened, e.g. `15:30`; `0` disables it.                                         |
 | `OPTION_STOP_LOSS`     | `0.5`            | Fraction of an option's premium lost that closes it. For example, `0.5` closes at a 50% loss; `0` disables it.                  |
 | `OPTION_FLATTEN_TIME`  | `15:45`          | US/Eastern `HH:MM` after which options expiring that day are closed.                                                            |
 
@@ -80,6 +84,12 @@ OPTION_FLATTEN_TIME=15:45
 - The loss tracker is created at `LOSS_DIRECTORY/losses.json` when needed. It
   persists across runs. To reset it after reviewing the losses, manually set
   `STATE=true` and delete the tracker file.
+- `TRADING_START` and `TRADING_STOP` limit when new entries can open, in
+  US/Eastern time, for every strategy and asset (including crypto). Either can
+  be `0` to leave that side open; a start later than the stop wraps past
+  midnight (e.g. `20:00` to `04:00`). Signals outside the window are logged
+  and dropped. Exits still run: take-profits, stops, reversal closes, and the
+  0DTE flatten are not blocked.
 - Use matching API keys and `ALPACA_BASE_URL` for the same account (paper or
   live). The Alpaca SDK appends `/v2`, so provide only the base URL.
 
@@ -211,7 +221,9 @@ skipped. A signal needs three timeframes to agree:
 3. **15-minute momentum:** the MACD histogram is rising (bullish) or falling
    (bearish).
 
-New entries are only taken from 9:45 to 15:00 ET. A bullish signal buys the
+Entry hours come from `TRADING_START`/`TRADING_STOP`; for 0DTE, a stop well
+before `OPTION_FLATTEN_TIME` (e.g. `15:00`) leaves time for a trade to work.
+A bullish signal buys the
 nearest-the-money call expiring today; a bearish signal buys the nearest put.
 Contracts with a bid/ask spread wider than 15% of the mid price are skipped.
 `risk.py` buys whole contracts with a day limit order at the ask, sized as

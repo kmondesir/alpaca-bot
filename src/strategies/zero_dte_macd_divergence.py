@@ -34,9 +34,6 @@ logger = logging.getLogger(__name__)
 
 MARKET_TZ = ZoneInfo("America/New_York")
 SESSION_OPEN = time(9, 30)
-# Skip the opening auction noise and leave time for a 0DTE trade to work.
-ENTRY_START = time(9, 45)
-ENTRY_CUTOFF = time(15, 0)
 
 SETUP_MINUTES = 5
 TRIGGER_MINUTES = 1
@@ -196,10 +193,7 @@ class ZeroDteMacdDivergenceStrategy:
         return None
 
     def evaluate(self, symbol: str, now: Optional[datetime] = None) -> Signal | None:
-        local_now = (now or datetime.now(timezone.utc)).astimezone(MARKET_TZ)
-        if not ENTRY_START <= local_now.time() < ENTRY_CUTOFF:
-            return None
-        today = local_now.date()
+        today = (now or datetime.now(timezone.utc)).astimezone(MARKET_TZ).date()
 
         setup_bars = self._closed_bars(symbol, SETUP_MINUTES)
         trigger_bars = self._closed_bars(symbol, TRIGGER_MINUTES)
