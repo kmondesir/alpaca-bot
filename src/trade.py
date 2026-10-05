@@ -11,8 +11,16 @@ from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Optional
 
 from alpaca.common.exceptions import APIError
-from alpaca.data.historical import CryptoHistoricalDataClient, StockHistoricalDataClient
-from alpaca.data.requests import CryptoLatestQuoteRequest, StockLatestQuoteRequest
+from alpaca.data.historical import (
+    CryptoHistoricalDataClient,
+    OptionHistoricalDataClient,
+    StockHistoricalDataClient,
+)
+from alpaca.data.requests import (
+    CryptoLatestQuoteRequest,
+    OptionLatestQuoteRequest,
+    StockLatestQuoteRequest,
+)
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import (
     AssetClass,
@@ -32,7 +40,7 @@ from alpaca.trading.requests import (
 import config
 import risk
 from db import PENDING_STATUSES, STATUSES, OrderDB
-from symbols import is_crypto_symbol, normalize_symbol
+from symbols import is_crypto_symbol, is_option_symbol, normalize_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +102,7 @@ class Trade:
         self.client = TradingClient(key, secret, url_override=url)
         self.stock_data = StockHistoricalDataClient(key, secret)
         self.crypto_data = CryptoHistoricalDataClient(key, secret)
+        self.option_data = OptionHistoricalDataClient(key, secret)
         self.db = db
 
     def _record_parent(self, order, description: Optional[str] = None) -> str:
@@ -277,6 +286,7 @@ class Trade:
         """Return the account's cash, equity and buying power."""
         account = self.client.get_account()
         non_marginable_buying_power = getattr(account, "non_marginable_buying_power", None)
+        options_buying_power = getattr(account, "options_buying_power", None)
         return {
             "currency": account.currency,
             "cash": float(account.cash),
@@ -286,6 +296,9 @@ class Trade:
                 float(non_marginable_buying_power)
                 if non_marginable_buying_power is not None
                 else 0.0
+            ),
+            "options_buying_power": (
+                float(options_buying_power) if options_buying_power is not None else 0.0
             ),
             "portfolio_value": float(account.portfolio_value),
         }
@@ -420,6 +433,38 @@ class Trade:
             description=description,
         )
 
+    def get_option_quote(self, symbol: str) -> dict:
+        """Return the latest bid/ask for an OCC option contract."""
+        symbol = normalize_symbol(symbol)
+        quote = self.option_data.get_option_latest_quote(
+            OptionLatestQuoteRequest(symbol_or_symbols=symbol)
+        )[symbol]
+        return {"bid": float(quote.bid_price or 0), "ask": float(quote.ask_price or 0)}
+
+    def open_option_position(
+        self,
+        symbol: str,
+        qty: int,
+        limit_price: float,
+        description: Optional[str] = None,
+        client_order_id: Optional[str] = None,
+    ):
+        """Buy to open whole option contracts with a day limit order."""
+        symbol = normalize_symbol(symbol)
+        if not is_option_symbol(symbol):
+            raise ValueError(f"{symbol} is not an option contract symbol")
+        if qty < 1 or int(qty) != qty:
+            raise ValueError("Option quantity must be a positive whole number of contracts")
+        return self.place_order(
+            symbol,
+            OrderSide.BUY.value,
+            qty=int(qty),
+            limit_price=_round_to_increment(limit_price, 0.01),
+            time_in_force="day",
+            client_order_id=client_order_id,
+            description=description,
+        )
+
     def protect_position(
         self,
         symbol: str,
@@ -440,11 +485,12 @@ class Trade:
         basis = qty * avg_price
         symbol = normalize_symbol(symbol)
         crypto = is_crypto_symbol(symbol)
+        option = is_option_symbol(symbol)
         entry_side = OrderSide(position_side.lower())
         if entry_side not in (OrderSide.BUY, OrderSide.SELL):
             raise ValueError("position_side must be 'buy' or 'sell'")
-        if crypto and entry_side != OrderSide.BUY:
-            raise ValueError("Crypto protective orders only support long positions")
+        if (crypto or option) and entry_side != OrderSide.BUY:
+            raise ValueError("Crypto and option protective orders only support long positions")
         if self.db.get_parent(parent_id) is None:
             raise KeyError(f"No parent position found for {parent_id!r}")
         exit_side = OrderSide.SELL if entry_side == OrderSide.BUY else OrderSide.BUY
@@ -476,7 +522,8 @@ class Trade:
                 parent_id=parent_id,
                 child_role="take_profit",
             )
-        if config.TRAILING_STOP_LOSS > 0:
+        # Alpaca has no trailing stops for options; risk.py enforces OPTION_STOP_LOSS instead.
+        if config.TRAILING_STOP_LOSS > 0 and not option:
             trailing_stop_id = config.new_client_order_id()
             if crypto:
                 if config.TRAILING_STOP_LOSS >= 1:

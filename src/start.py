@@ -14,7 +14,7 @@ from alpaca.trading.requests import GetAssetsRequest
 import config
 import risk
 from db import OrderDB
-from strategy import MacdPsarStrategy, Signal
+from strategies import DEFAULT_STRATEGY, STRATEGIES, Signal, build_strategy
 from symbols import is_crypto_symbol, normalize_symbol
 from trade import Trade
 
@@ -77,6 +77,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--assets",
         type=_parse_assets,
         help="required comma-separated assets for a scheduled strategy run, e.g. SPY,AAPL,BTC/USD",
+    )
+    parser.add_argument(
+        "--strategy",
+        choices=sorted(STRATEGIES),
+        default=DEFAULT_STRATEGY,
+        help=f"strategy for a scheduled run (default: {DEFAULT_STRATEGY})",
     )
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("get_balance", help="show account balances")
@@ -203,9 +209,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         if not assets:
             logger.error("No tradable assets left in --assets; skipping strategy")
             return
-        signals = MacdPsarStrategy(trade.stock_data, assets).generate_signals()
+        signals = build_strategy(args.strategy, trade, assets).generate_signals()
         if not signals:
-            logger.info("No strategy signal for %s this run", ", ".join(assets))
+            logger.info("No %s signal for %s this run", args.strategy, ", ".join(assets))
         risk.process_strategy_signals(trade, signals)
     else:
         _run_command(args, trade, db)

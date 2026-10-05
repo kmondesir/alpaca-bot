@@ -53,6 +53,10 @@ TRAILING_STOP_LOSS = float(os.getenv("TRAILING_STOP_LOSS", "0.05"))
 # MAX_CONSECUTIVE_LOSSES: after this many losing trades in a row, STATE is switched off.
 MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSS", "5"))
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
+# OPTION_STOP_LOSS: fraction of the option premium lost that closes the position.
+OPTION_STOP_LOSS = float(os.getenv("OPTION_STOP_LOSS", "0.5"))
+# OPTION_FLATTEN_TIME: US/Eastern HH:MM after which same-day-expiry options are closed.
+OPTION_FLATTEN_TIME = os.getenv("OPTION_FLATTEN_TIME", "15:45")
 
 # Relative LOSS_DIRECTORY paths resolve from the project root.
 LOSS_DIRECTORY = ROOT_DIR / os.getenv("LOSS_DIRECTORY", "status")

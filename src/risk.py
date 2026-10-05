@@ -7,9 +7,12 @@ human must review the losses, delete the file, and set STATE back to true.
 
 import json
 import logging
+import math
 import sqlite3
 from contextlib import closing
+from datetime import datetime, time
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from alpaca.common.exceptions import APIError
 from alpaca.trading.enums import AssetClass, OrderStatus, QueryOrderStatus
@@ -17,12 +20,21 @@ from alpaca.trading.requests import GetOrdersRequest
 from dotenv import set_key
 
 import config
-from symbols import crypto_pair, is_crypto_symbol, normalize_symbol
-from db import utc_now
+from symbols import (
+    crypto_pair,
+    is_crypto_symbol,
+    is_option_symbol,
+    normalize_symbol,
+    option_expiration,
+    option_type,
+    option_underlying,
+)
+from db import PENDING_STATUSES, utc_now
 
 logger = logging.getLogger(__name__)
 
 LOSS_FILE = config.LOSS_DIRECTORY / "losses.json"
+MARKET_TZ = ZoneInfo("America/New_York")
 ENV_FILE = config.ROOT_DIR / ".env"
 
 _STRATEGY_SIGNALS_SCHEMA = """
@@ -265,6 +277,47 @@ def _protect_pending_strategy_entries(trade) -> None:
             )
 
 
+def _close_tracked_option(trade, parent_id: str):
+    """Cancel pending protective children (they reserve the contracts), then close."""
+    for child in trade.db.children_by_parent(parent_id):
+        if child["status"] in PENDING_STATUSES:
+            try:
+                trade.cancel_order(child["child_id"])
+            except APIError as error:
+                logger.warning("Could not cancel %s before closing %s: %s", child["child_id"], parent_id, error)
+    return trade.close_order(parent_id)
+
+
+def _manage_option_positions(trade) -> None:
+    """Close tracked options that hit OPTION_STOP_LOSS or expire today after OPTION_FLATTEN_TIME."""
+    parents = [row for row in trade.db.parents_by_status("OPEN") if is_option_symbol(row["symbol"])]
+    if not parents or not trade.is_market_open():
+        return
+    now = datetime.now(MARKET_TZ)
+    flatten_at = time.fromisoformat(config.OPTION_FLATTEN_TIME)
+    positions = {
+        normalize_symbol(position.symbol): position
+        for position in trade.client.get_all_positions()
+    }
+    for row in parents:
+        symbol = row["symbol"]
+        position = positions.get(symbol)
+        if position is None:
+            continue
+        loss = -float(position.unrealized_plpc or 0)
+        if option_expiration(symbol) <= now.date() and now.time() >= flatten_at:
+            reason = f"expires today and it is past {config.OPTION_FLATTEN_TIME} ET"
+        elif config.OPTION_STOP_LOSS > 0 and loss >= config.OPTION_STOP_LOSS:
+            reason = f"premium down {loss:.0%} (stop {config.OPTION_STOP_LOSS:.0%})"
+        else:
+            continue
+        logger.info("Closing option %s (%s): %s", symbol, row["parent_id"], reason)
+        try:
+            _close_tracked_option(trade, row["parent_id"])
+        except APIError as error:
+            logger.warning("Could not close option %s; retrying next run: %s", row["parent_id"], error)
+
+
 def _loss_limit_reached() -> bool:
     limit = config.MAX_CONSECUTIVE_LOSSES
     if limit <= 0:
@@ -310,6 +363,10 @@ def process_strategy_signals(trade, signals: list) -> list:
         _protect_pending_strategy_entries(trade)
     except Exception:
         logger.exception("Could not reconcile strategy protective orders")
+    try:
+        _manage_option_positions(trade)
+    except Exception:
+        logger.exception("Could not manage option positions")
 
     if not signals:
         return []
@@ -341,6 +398,53 @@ def process_strategy_signals(trade, signals: list) -> list:
 
         close_attempted = False
         try:
+            if signal.is_option:
+                held = [occupied for occupied in occupied_symbols if option_underlying(occupied) == signal.underlying]
+                if any(option_type(held_symbol) == option_type(symbol) for held_symbol in held):
+                    logger.info("Existing %s option blocks another entry on %s", option_type(symbol), signal.underlying)
+                    ignore_strategy_signal(client_order_id)
+                    continue
+                if held:
+                    for held_symbol in held:
+                        for entry in strategy_entries_for_symbol(held_symbol):
+                            row = trade.db.get(entry["client_order_id"])
+                            if not entry["position_closed"] and row is not None and row["status"] in active_statuses:
+                                close_attempted = True
+                                _close_tracked_option(trade, entry["client_order_id"])
+                    ignore_strategy_signal(client_order_id)
+                    logger.info("Closed opposite options on %s; waiting for a new signal before reversing", signal.underlying)
+                    continue
+                if len(occupied_symbols) >= config.MAX_OPEN_POSITIONS:
+                    logger.warning(
+                        "Maximum open positions reached (%d/%d); blocking %s",
+                        len(occupied_symbols),
+                        config.MAX_OPEN_POSITIONS,
+                        symbol,
+                    )
+                    ignore_strategy_signal(client_order_id)
+                    continue
+
+                ask = trade.get_option_quote(symbol)["ask"]
+                balance = trade.get_balance()
+                buying_power = balance["options_buying_power"] or balance["buying_power"]
+                qty = math.floor(buying_power * config.WAGER / (ask * 100)) if ask > 0 else 0
+                if qty < 1:
+                    logger.warning("Wager does not cover one %s contract at ask %.2f; blocking", symbol, ask)
+                    ignore_strategy_signal(client_order_id)
+                    continue
+                order = trade.open_option_position(
+                    symbol,
+                    qty,
+                    limit_price=ask,
+                    description=signal.description,
+                    client_order_id=client_order_id,
+                )
+                submitted_orders.append(order)
+                occupied_symbols.add(symbol)
+                logger.info("Risk manager submitted %d %s for %s %s view", qty, symbol, signal.underlying, signal.direction)
+                _protect_pending_strategy_entries(trade)
+                continue
+
             position = positions.get(symbol)
             if position is not None:
                 position_side = "buy" if str(position.side).lower().endswith("long") else "sell"
@@ -407,7 +511,7 @@ def process_strategy_signals(trade, signals: list) -> list:
                 symbol,
                 side=signal.side,
                 notional=notional,
-                description=(
+                description=signal.description or (
                     f"MACD {signal.direction} crossover confirmed by 1m and 5m PSAR "
                     f"at {signal.bar_timestamp.isoformat()}"
                 ),

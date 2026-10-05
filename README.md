@@ -38,6 +38,9 @@ TRAILING_STOP_LOSS=0.05
 MAX_CONSECUTIVE_LOSS=5
 MAX_OPEN_POSITIONS=3
 LOSS_DIRECTORY=status
+
+OPTION_STOP_LOSS=0.5
+OPTION_FLATTEN_TIME=15:45
 ```
 
 | Variable               | Default          | Description                                                                                                                     |
@@ -60,6 +63,8 @@ LOSS_DIRECTORY=status
 | `MAX_CONSECUTIVE_LOSS` | `5`              | Consecutive losing trades allowed before the bot sets `STATE=false` in `.env`; `0` disables this kill switch.                   |
 | `MAX_OPEN_POSITIONS`   | `3`              | Maximum number of distinct open positions. Pending orders reserve a slot; additional orders for an existing symbol are allowed. |
 | `LOSS_DIRECTORY`       | `status`         | Directory, relative to the project root, for `losses.json`, which stores loss history and the consecutive-loss count.           |
+| `OPTION_STOP_LOSS`     | `0.5`            | Fraction of an option's premium lost that closes it. For example, `0.5` closes at a 50% loss; `0` disables it.                  |
+| `OPTION_FLATTEN_TIME`  | `15:45`          | US/Eastern `HH:MM` after which options expiring that day are closed.                                                            |
 
 ### Risk management
 
@@ -149,14 +154,29 @@ accepted as an alias for `BTC/USD`:
 ```bash
 python src/start.py --assets SPY
 python src/start.py --assets SPY,AAPL,BTC/USD
+python src/start.py --assets SPY,QQQ --strategy 0dte_macd_divergence
 ```
+
+`--strategy` selects the strategy from `src/strategies/`; it defaults to
+`macd_psar`.
+
+| Strategy               | Trades         | Description                                                              |
+| ---------------------- | -------------- | ------------------------------------------------------------------------ |
+| `macd_psar` (default)  | Stocks, crypto | 15-minute MACD crossover confirmed by 1- and 5-minute Parabolic SAR.     |
+| `0dte_macd_divergence` | 0DTE options   | 5-minute MACD divergence, 1-minute MACD cross, 15-minute histogram turn. |
 
 `open_position` submits a market order sized by risk using `WAGER` from `.env`.
 `close_position` closes a tracked position. Both require `STATE=true` and an
 open market; the read-only commands do not require `STATE`. With no subcommand,
 the scheduled strategy requires the `--assets` argument.
 
-### Strategy
+### Strategies
+
+Strategies live in `src/strategies/`, one module per strategy, and are
+registered by name in `src/strategies/__init__.py`. Each one only returns
+signals; `risk.py` gates and executes them.
+
+#### `macd_psar`
 
 Each asset in `--assets` is evaluated in turn, and every asset that produces a
 signal is sent on to `risk.py`. The strategy checks closed 15-minute
@@ -175,6 +195,41 @@ price at the run interval, not tick by tick. A fast drop can trigger a
 stop-limit without filling it, so when a run finds the bid at or below a stop
 that has not filled, it cancels the stop and sells the remainder at market.
 Crypto position sizing uses non-marginable buying power.
+
+#### `0dte_macd_divergence`
+
+Trades options that expire the same day on the underlyings in `--assets`, so
+use tickers with daily expirations such as `SPY`, `QQQ`, or `IWM`; crypto is
+skipped. A signal needs three timeframes to agree:
+
+1. **5-minute setup:** a regular MACD divergence within today's session. A
+   lower swing low with a higher MACD low below zero is bullish; a higher swing
+   high with a lower MACD high above zero is bearish. The second swing must be
+   at most 6 bars (30 minutes) old.
+2. **1-minute trigger:** MACD crosses its signal line in the same direction on
+   the latest closed bar.
+3. **15-minute momentum:** the MACD histogram is rising (bullish) or falling
+   (bearish).
+
+New entries are only taken from 9:45 to 15:00 ET. A bullish signal buys the
+nearest-the-money call expiring today; a bearish signal buys the nearest put.
+Contracts with a bid/ask spread wider than 15% of the mid price are skipped.
+`risk.py` buys whole contracts with a day limit order at the ask, sized as
+`WAGER` × options buying power ÷ (ask × 100). It holds one option direction
+per underlying at a time; an opposite signal closes the tracked position and
+waits for a new signal before reversing.
+
+Exits:
+
+- a `TAKE_PROFIT` limit sell (Alpaca has no trailing stops for options, so
+  `TRAILING_STOP_LOSS` is not used);
+- `OPTION_STOP_LOSS`, checked on each run against the position's unrealized
+  loss;
+- every option expiring that day is closed at `OPTION_FLATTEN_TIME`.
+
+Stop-loss and flatten checks only happen when the script runs, so the
+every-minute cron schedule matters. The account must be approved for options
+trading.
 
 Set `STATE=true` in `.env` and provide one or more assets, then:
 
