@@ -145,7 +145,10 @@ python src/start.py close_position AAPL
 ```
 
 For the scheduled strategy, pass one or more comma-separated assets without a
-subcommand. Stocks use Alpaca's IEX feed; crypto pairs use crypto bars. `BTC` is
+subcommand. Stocks use Alpaca's IEX feed; crypto pairs use crypto bars. A bare
+name that Alpaca also trades as a USD crypto pair (for example `ETH`) is
+converted to that pair with a warning, so write `NAME/USD` for crypto. Assets
+Alpaca doesn't list as tradable are skipped with an error. `BTC` is
 accepted as an alias for `BTC/USD`:
 
 ```bash
@@ -184,9 +187,14 @@ Alpaca's IEX feed. It only
 returns signals; `start.py` sends them to `risk.py`, which requires `STATE=true`,
 prevents duplicate entries, applies `WAGER`, and handles protective exits and
 tracked reversals. Crypto runs 24/7, is long-only, and uses GTC orders. The
-configured `TRAILING_STOP_LOSS` fraction becomes a fixed stop-limit for crypto;
-crypto position sizing uses non-marginable buying power. As with all stop-limit
-orders, a fast price gap can prevent execution.
+configured `TRAILING_STOP_LOSS` fraction becomes a stop-limit for crypto, since
+Alpaca has no crypto trailing-stop order; each run raises it to that fraction
+below the current bid once it can move by a tenth of the trail distance, and
+never lowers it. Because the bot moves the stop once per run, it trails the
+price at the run interval, not tick by tick. A fast drop can trigger a
+stop-limit without filling it, so when a run finds the bid at or below a stop
+that has not filled, it cancels the stop and sells the remainder at market.
+Crypto position sizing uses non-marginable buying power.
 
 #### `0dte_macd_divergence`
 

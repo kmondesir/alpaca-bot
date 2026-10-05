@@ -15,12 +15,13 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from alpaca.common.exceptions import APIError
-from alpaca.trading.enums import OrderStatus, QueryOrderStatus
+from alpaca.trading.enums import AssetClass, OrderStatus, QueryOrderStatus
 from alpaca.trading.requests import GetOrdersRequest
 from dotenv import set_key
 
 import config
 from symbols import (
+    crypto_pair,
     is_crypto_symbol,
     is_option_symbol,
     normalize_symbol,
@@ -189,44 +190,91 @@ def mark_strategy_position_closed(symbol: str, entry_side: str) -> None:
             )
 
 
-def _protect_pending_strategy_entries(trade) -> None:
-    terminal_statuses = {
-        OrderStatus.FILLED,
-        OrderStatus.CANCELED,
-        OrderStatus.EXPIRED,
-        OrderStatus.REJECTED,
-        OrderStatus.REPLACED,
-    }
-    for entry in pending_strategy_entries():
-        client_order_id = entry["client_order_id"]
-        row = trade.db.get(client_order_id)
-        if row is None or row["status"] == "SKIPPED":
-            release_strategy_signal(client_order_id)
-            continue
-        try:
-            order = trade.client.get_order_by_client_id(client_order_id)
-        except APIError as error:
-            logger.warning("Could not check strategy entry %s: %s", client_order_id, error)
-            continue
+_TERMINAL_STATUSES = {
+    OrderStatus.FILLED,
+    OrderStatus.CANCELED,
+    OrderStatus.EXPIRED,
+    OrderStatus.REJECTED,
+    OrderStatus.REPLACED,
+}
 
-        filled_quantity = float(order.filled_qty or 0)
-        protected_quantity = float(entry["protected_qty"])
-        additional_quantity = filled_quantity - protected_quantity
-        average_price = float(order.filled_avg_price or 0)
-        if additional_quantity > 0 and average_price > 0:
+
+def _position_symbol(position) -> str:
+    """Alpaca reports crypto positions without the slash used everywhere else."""
+    if position.asset_class == AssetClass.CRYPTO:
+        return crypto_pair(position.symbol)
+    return normalize_symbol(position.symbol)
+
+
+def available_quantity(trade, symbol: str) -> float:
+    """Return the held quantity not already reserved by open orders.
+
+    Alpaca deducts crypto fees from the purchased asset, so the held quantity
+    can be smaller than the entry order's filled_qty.
+    """
+    target = normalize_symbol(symbol)
+    for position in trade.client.get_all_positions():
+        if _position_symbol(position) == target:
+            return float(position.qty_available or 0)
+    return 0.0
+
+
+def _protect_strategy_entry(trade, entry: dict) -> None:
+    client_order_id = entry["client_order_id"]
+    row = trade.db.get(client_order_id)
+    if row is None or row["status"] == "SKIPPED":
+        release_strategy_signal(client_order_id)
+        return
+    try:
+        order = trade.client.get_order_by_client_id(client_order_id)
+    except APIError as error:
+        logger.warning("Could not check strategy entry %s: %s", client_order_id, error)
+        return
+
+    symbol = entry["symbol"]
+    filled_quantity = float(order.filled_qty or 0)
+    protected_quantity = float(entry["protected_qty"])
+    additional_quantity = filled_quantity - protected_quantity
+    average_price = float(order.filled_avg_price or 0)
+    if additional_quantity > 0 and average_price > 0:
+        if is_crypto_symbol(symbol):
+            available_quantity = available_quantity(trade, symbol)
+            if available_quantity < additional_quantity:
+                logger.info(
+                    "Protecting %s of %s filled %s; the rest went to fees or is already reserved",
+                    available_quantity,
+                    additional_quantity,
+                    symbol,
+                )
+                additional_quantity = available_quantity
+        if additional_quantity > 0:
             trade.protect_position(
-                entry["symbol"],
+                symbol,
                 additional_quantity,
                 average_price,
-                description=f"strategy protection for {entry['symbol']}",
+                description=f"strategy protection for {symbol}",
                 position_side=entry["side"],
                 parent_id=client_order_id,
             )
-            update_strategy_protection(client_order_id, filled_quantity)
-            protected_quantity = filled_quantity
+        else:
+            logger.warning("No available %s to protect for %s", symbol, client_order_id)
+        update_strategy_protection(client_order_id, filled_quantity)
+        protected_quantity = filled_quantity
 
-        if order.status in terminal_statuses and filled_quantity <= protected_quantity:
-            update_strategy_protection(client_order_id, protected_quantity, complete=True)
+    if order.status in _TERMINAL_STATUSES and filled_quantity <= protected_quantity:
+        update_strategy_protection(client_order_id, protected_quantity, complete=True)
+
+
+def _protect_pending_strategy_entries(trade) -> None:
+    for entry in pending_strategy_entries():
+        try:
+            _protect_strategy_entry(trade, entry)
+        except Exception:
+            logger.exception(
+                "Could not protect strategy entry %s for %s",
+                entry["client_order_id"],
+                entry["symbol"],
+            )
 
 
 def _close_tracked_option(trade, parent_id: str):
@@ -298,7 +346,7 @@ def _loss_limit_reached() -> bool:
 
 def _occupied_symbols(trade) -> tuple[dict, set[str]]:
     positions = {
-        normalize_symbol(position.symbol): position
+        _position_symbol(position): position
         for position in trade.client.get_all_positions()
     }
     pending_orders = trade.client.get_orders(
