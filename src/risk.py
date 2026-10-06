@@ -238,15 +238,15 @@ def _protect_strategy_entry(trade, entry: dict) -> None:
     average_price = float(order.filled_avg_price or 0)
     if additional_quantity > 0 and average_price > 0:
         if is_crypto_symbol(symbol):
-            available_quantity = available_quantity(trade, symbol)
-            if available_quantity < additional_quantity:
+            held_quantity = available_quantity(trade, symbol)
+            if held_quantity < additional_quantity:
                 logger.info(
                     "Protecting %s of %s filled %s; the rest went to fees or is already reserved",
-                    available_quantity,
+                    held_quantity,
                     additional_quantity,
                     symbol,
                 )
-                additional_quantity = available_quantity
+                additional_quantity = held_quantity
         if additional_quantity > 0:
             trade.protect_position(
                 symbol,
@@ -278,13 +278,7 @@ def _protect_pending_strategy_entries(trade) -> None:
 
 
 def _close_tracked_option(trade, parent_id: str):
-    """Cancel pending protective children (they reserve the contracts), then close."""
-    for child in trade.db.children_by_parent(parent_id):
-        if child["status"] in PENDING_STATUSES:
-            try:
-                trade.cancel_order(child["child_id"])
-            except APIError as error:
-                logger.warning("Could not cancel %s before closing %s: %s", child["child_id"], parent_id, error)
+    """Close a tracked option; close_order cancels its protective children first."""
     return trade.close_order(parent_id)
 
 
