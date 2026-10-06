@@ -40,7 +40,7 @@ from alpaca.trading.requests import (
 import config
 import risk
 from db import PENDING_STATUSES, STATUSES, OrderDB
-from symbols import is_crypto_symbol, is_option_symbol, normalize_symbol
+from symbols import crypto_pair, is_crypto_symbol, is_option_symbol, normalize_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -800,9 +800,21 @@ class Trade:
         if filled == 0:
             self._record_parent(order, "close_order: nothing filled, order cancelled")
             return None
+        if self._cancel_protective_children(client_order_id):
+            logger.info("%s was already closed by its protective order", client_order_id)
+            return None
 
+        # A crypto order's asset_id is the trading pair, not the held position,
+        # so close by the position's own asset_id.
+        position = self._find_position(order.symbol)
+        if position is None:
+            raise RuntimeError(f"No open position found for {order.symbol}")
+        # Crypto fees come out of the purchased coin, so hold less than filled.
+        quantity = min(filled, abs(float(position.qty_available or 0)))
+        if quantity <= 0:
+            raise RuntimeError(f"No available {order.symbol} to close for {client_order_id}")
         closing = self.client.close_position(
-            order.asset_id, close_options=ClosePositionRequest(qty=str(filled))
+            position.asset_id, close_options=ClosePositionRequest(qty=str(quantity))
         )
         closing_status = _db_status(closing)
         self.db.save_parent_close(
@@ -815,8 +827,45 @@ class Trade:
             closing.order_type.value,
         )
         self._finalize_parent_close(client_order_id, closing_status, None)
-        logger.info("Closed %s of %s (%s)", filled, order.symbol, client_order_id)
+        logger.info("Closed %s of %s (%s)", quantity, order.symbol, client_order_id)
         return closing
+
+    def _cancel_protective_children(self, parent_id: str) -> bool:
+        """Cancel a parent's working exits, which reserve the held quantity.
+
+        Returns True when one of them had already filled, meaning the position
+        is closed and nothing is left to sell.
+        """
+        exited = False
+        for child in self.db.children_by_parent(parent_id):
+            if child["status"] not in PENDING_STATUSES:
+                continue
+            child_id = child["child_id"]
+            order = self.client.get_order_by_client_id(child_id)
+            if order.status not in _DONE_STATUSES:
+                if order.status != OrderStatus.PENDING_CANCEL:
+                    self.client.cancel_order_by_id(order.id)
+                order = self._wait_until_done(order.id)
+            if order.status not in _DONE_STATUSES:
+                raise RuntimeError(f"Cancel of {child_id} is still pending; retry the close next run")
+            status = self._record_child(order)
+            if status == "FILLED":
+                self._finalize_child(child_id, status, child["status"])
+                exited = True
+        return exited
+
+    def _find_position(self, symbol: str):
+        """Return the open position for symbol, matching crypto pairs to Alpaca's unslashed form."""
+        target = normalize_symbol(symbol)
+        for position in self.client.get_all_positions():
+            held = (
+                crypto_pair(position.symbol)
+                if position.asset_class == AssetClass.CRYPTO
+                else normalize_symbol(position.symbol)
+            )
+            if held == target:
+                return position
+        return None
 
     def close_orders(self) -> list:
         """Close every order in the database tagged with this PREFIX.
