@@ -57,6 +57,15 @@ def _resolve_assets(trade: Trade, assets: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(resolved))
 
 
+def _open_market_assets(trade: Trade, assets: tuple[str, ...]) -> tuple[str, ...]:
+    """Drop stock and option underlyings while the market is closed; crypto trades 24/7."""
+    closed = [asset for asset in assets if not is_crypto_symbol(asset)]
+    if not closed or trade.is_market_open():
+        return assets
+    logger.info("Market closed; skipping strategy for %s", ", ".join(closed))
+    return tuple(asset for asset in assets if is_crypto_symbol(asset))
+
+
 def _tradable_stock(trade: Trade, symbol: str) -> bool:
     try:
         asset = trade.client.get_asset(symbol)
@@ -209,9 +218,11 @@ def main(argv: Optional[list[str]] = None) -> None:
         if not assets:
             logger.error("No tradable assets left in --assets; skipping strategy")
             return
-        signals = build_strategy(args.strategy, trade, assets).generate_signals()
-        if not signals:
+        assets = _open_market_assets(trade, assets)
+        signals = build_strategy(args.strategy, trade, assets).generate_signals() if assets else []
+        if assets and not signals:
             logger.info("No %s signal for %s this run", args.strategy, ", ".join(assets))
+        # Always runs: reconciles take-profits and manages option stops/flatten.
         risk.process_strategy_signals(trade, signals)
     else:
         _run_command(args, trade, db)

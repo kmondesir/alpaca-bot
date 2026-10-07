@@ -261,6 +261,13 @@ Set `STATE=true` in `.env` and provide one or more assets, then:
 python src/start.py --assets SPY,AAPL
 ```
 
+Before running the strategy, `start.py` checks Alpaca's market clock (which
+accounts for holidays and early closes). While the market is closed, stock and
+option underlyings in `--assets` are skipped and logged ("Market closed;
+skipping strategy for ..."); crypto still runs 24/7. `risk.py` checks the clock
+again before each entry as a second guard. Take-profit reconciliation still runs
+when the market is closed.
+
 The script runs once and exits; it does not poll. In production it is run
 every 60 seconds by a cron job, for example:
 
