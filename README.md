@@ -17,35 +17,43 @@ All settings are read from `.env` by `src/config.py`. Any variable left out
 falls back to its default.
 
 ```env
-ALPACA_BASE_URL=
-ALPACA_API_KEY=
+# API keys
 ALPACA_SECRET_KEY=
-DEMO=true
-STATE=false
+COINMARKETCAP_API_KEY=
+MARKETDATA_API_KEY=
 
-LOG_DIRECTORY=logs
+# Broker config
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+ALPACA_API_KEY=
+DEMO=true
+STATE=true
+
+# Log File management
+LOG_DIRECTORY=C:\logs\alpaca
 LOG_NAME=alpaca.log
 MAX_SIZE_IN_MB=10
 MAX_BACKUP=5
 LOG_LEVEL=INFO
 
-PREFIX=alpaca
+# Order history management
+PREFIX=alpaca-bot
 DB_PATH=data/alpaca.db
 
+# Risk management
 WAGER=0.04
-TAKE_PROFIT=0.5
+TAKE_PROFIT=0
 STOP_LOSS=0.05
 MAX_CONSECUTIVE_LOSS=5
-MAX_OPEN_POSITIONS=3
 LOSS_DIRECTORY=status
-TRADING_START=0
-TRADING_STOP=0
+MAX_OPEN_POSITIONS=3
+TRADING_START=15:00
+TRADING_STOP=16:00
 
+# Option trading management
 OPTION_STOP_LOSS=0.5
-OPTION_FLATTEN_TIME=15:45
-GEX_FILTER=true
+OPTION_FLATTEN_TIME=20:45
+GEX_FILTER=false
 GEX_THRESHOLD=0
-MARKETDATA_API_KEY=
 ```
 
 | Variable               | Default          | Description                                                                                                                     |
@@ -53,6 +61,7 @@ MARKETDATA_API_KEY=
 | `ALPACA_API_KEY`       | _(empty)_        | Alpaca API key.                                                                                                                 |
 | `ALPACA_SECRET_KEY`    | _(empty)_        | Alpaca API secret.                                                                                                              |
 | `ALPACA_BASE_URL`      | _(empty)_        | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`.         |
+| `COINMARKETCAP_API_KEY` | _(empty)_       | Optional key for `CoinMarketCapClient`, which retrieves latest cryptocurrency quotes; Binance, Coinbase, and Yahoo Finance do not require it. |
 | `DEMO`                 | `true`           | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                                |
 | `STATE`                | `false`          | Kill switch. The script only runs when `true`; otherwise it logs a message and exits.                                           |
 | `LOG_DIRECTORY`        | `logs`           | Folder for log files, relative to the project root. Created if missing.                                                         |
