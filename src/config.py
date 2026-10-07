@@ -59,6 +59,10 @@ MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
 OPTION_STOP_LOSS = float(os.getenv("OPTION_STOP_LOSS", "0.5"))
 # OPTION_FLATTEN_TIME: US/Eastern HH:MM after which same-day-expiry options are closed.
 OPTION_FLATTEN_TIME = os.getenv("OPTION_FLATTEN_TIME", "15:45")
+# GEX_FILTER: 0DTE entries only when the underlying's dealer net gamma exposure is negative.
+GEX_FILTER = os.getenv("GEX_FILTER", "true").lower() == "true"
+# GEX_THRESHOLD: net GEX (dollars per 1% move) must be below -GEX_THRESHOLD; 0 accepts any negative value.
+GEX_THRESHOLD = float(os.getenv("GEX_THRESHOLD", "0"))
 
 
 def _window_time(name: str) -> Optional[clock_time]:

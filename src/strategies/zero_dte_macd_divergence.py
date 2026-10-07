@@ -7,8 +7,15 @@ A direction change needs three timeframes to agree:
    (bullish), or price makes a higher swing high while MACD makes a lower high
    above zero (bearish).
 2. Trigger (1m): the MACD line crosses its signal line in the divergence
-   direction on the latest closed bar.
+   direction on the latest closed bar, below zero for calls and above zero
+   for puts.
 3. Momentum (15m): the MACD histogram is turning the same way.
+
+With GEX_FILTER on, a signal is only traded when dealer net gamma exposure
+(GEX) on today's chain is negative (below -GEX_THRESHOLD). In negative gamma,
+dealer hedging amplifies moves rather than damping them. GEX sums
+gamma x open interest x 100 x spot^2 x 1% over contracts expiring today, with
+calls positive and puts negative. If GEX can't be computed, the trade is skipped.
 
 A long view buys the nearest-the-money call expiring today; a short view buys
 the nearest-the-money put. Only underlyings with same-day expirations (e.g.
@@ -21,10 +28,11 @@ from datetime import datetime, time, timezone
 from typing import Literal, Optional
 from zoneinfo import ZoneInfo
 
-from alpaca.data.requests import OptionLatestQuoteRequest
+from alpaca.data.requests import OptionChainRequest, OptionLatestQuoteRequest
 from alpaca.trading.enums import ContractType
 from alpaca.trading.requests import GetOptionContractsRequest
 
+import config
 from symbols import is_crypto_symbol, is_option_symbol, normalize_symbol
 
 from .base import Signal, closed_bars
@@ -91,15 +99,16 @@ def find_divergence(bars: list, session_start: int) -> tuple[Direction, int] | N
 
 
 def macd_cross(bars: list) -> Direction | None:
-    """Direction of a MACD/signal cross on the latest bar, at any level."""
+    """Direction of a MACD/signal cross on the latest bar: bullish below zero, bearish above."""
     result = macd([float(bar.close) for bar in bars])
     if result is None:
         return None
-    _, _, histogram = result
+    line, signal, histogram = result
     previous, current = histogram[-2:]
-    if previous <= 0 < current:
+    levels = line[-2:] + signal[-2:]
+    if previous <= 0 < current and max(levels) < 0:
         return "long"
-    if previous >= 0 > current:
+    if previous >= 0 > current and min(levels) > 0:
         return "short"
     return None
 
@@ -157,6 +166,56 @@ class ZeroDteMacdDivergenceStrategy:
     def _closed_bars(self, symbol: str, minutes: int) -> list:
         return closed_bars(self.data_client, None, symbol, minutes)
 
+    def net_gex(self, underlying: str, spot: float, today) -> Optional[float]:
+        """Dealer net gamma exposure in dollars per 1% move for contracts expiring today."""
+        open_interest = {}
+        page_token = None
+        while True:
+            response = self.trading_client.get_option_contracts(
+                GetOptionContractsRequest(
+                    underlying_symbols=[underlying],
+                    expiration_date=today,
+                    limit=10000,
+                    page_token=page_token,
+                )
+            )
+            for contract in response.option_contracts or []:
+                if contract.open_interest:
+                    open_interest[contract.symbol] = (float(contract.open_interest), contract.type)
+            page_token = response.next_page_token
+            if not page_token:
+                break
+
+        snapshots = self.option_data_client.get_option_chain(
+            OptionChainRequest(underlying_symbol=underlying, expiration_date=today)
+        )
+        total = 0.0
+        counted = 0
+        for symbol, (interest, contract_type) in open_interest.items():
+            snapshot = snapshots.get(symbol)
+            gamma = snapshot.greeks.gamma if snapshot is not None and snapshot.greeks else None
+            if gamma is None:
+                continue
+            sign = 1 if contract_type == ContractType.CALL else -1
+            total += sign * gamma * interest * 100 * spot * spot * 0.01
+            counted += 1
+        if counted == 0:
+            return None
+        return total
+
+    def gex_allows(self, underlying: str, spot: float, today) -> bool:
+        if not config.GEX_FILTER:
+            return True
+        gex = self.net_gex(underlying, spot, today)
+        if gex is None:
+            logger.info("Skipping %s: no gamma/open interest data to compute GEX", underlying)
+            return False
+        if gex >= -config.GEX_THRESHOLD:
+            logger.info("Skipping %s: net GEX %.0f is not below %.0f", underlying, gex, -config.GEX_THRESHOLD)
+            return False
+        logger.info("Net GEX for %s is %.0f (negative gamma); trading", underlying, gex)
+        return True
+
     def select_contract(self, underlying: str, direction: Direction, price: float, today) -> Optional[str]:
         """Return the nearest-the-money contract expiring today with an acceptable spread."""
         contract_type = ContractType.CALL if direction == "long" else ContractType.PUT
@@ -205,6 +264,8 @@ class ZeroDteMacdDivergenceStrategy:
             return None
 
         trigger_bar = trigger_bars[-1]
+        if not self.gex_allows(symbol, float(trigger_bar.close), today):
+            return None
         contract = self.select_contract(symbol, direction, float(trigger_bar.close), today)
         if contract is None:
             return None
@@ -216,7 +277,8 @@ class ZeroDteMacdDivergenceStrategy:
             underlying=symbol,
             description=(
                 f"0DTE {option_kind} on {symbol}: 5m MACD {direction} divergence, "
-                f"1m MACD cross, 15m histogram turn at {trigger_bar.timestamp.isoformat()}"
+                f"1m MACD cross {'below' if direction == 'long' else 'above'} zero, "
+                f"15m histogram turn at {trigger_bar.timestamp.isoformat()}"
             ),
         )
 
