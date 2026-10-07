@@ -208,24 +208,41 @@ def main(argv: Optional[list[str]] = None) -> None:
     db = OrderDB()
     trade = Trade(config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY, config.BASE_URL, db)
     if args.command is None:
-        trade.manage_crypto_stops()
-        trade.sync_orders()
-        try:
-            assets = _resolve_assets(trade, args.assets)
-        except APIError as error:
-            logger.error("Could not check --assets against Alpaca; skipping strategy: %s", error)
-            return
-        if not assets:
-            logger.error("No tradable assets left in --assets; skipping strategy")
-            return
-        assets = _open_market_assets(trade, assets)
-        signals = build_strategy(args.strategy, trade, assets).generate_signals() if assets else []
-        if assets and not signals:
-            logger.info("No %s signal for %s this run", args.strategy, ", ".join(assets))
-        # Always runs: reconciles take-profits and manages option stops/flatten.
-        risk.process_strategy_signals(trade, signals)
+        _run_strategy(args, trade)
     else:
         _run_command(args, trade, db)
+
+
+def _run_strategy(args, trade: Trade) -> None:
+    """One scheduled run: housekeeping, then a fresh signal check for every asset.
+
+    Each step is guarded so a failure in one (an API error, a network timeout)
+    is logged and the rest still run; otherwise a single bad step would skip
+    the entry check on every run of the trading window.
+    """
+    for step in (trade.manage_crypto_stops, trade.sync_orders):
+        try:
+            step()
+        except Exception:
+            logger.exception("%s failed; continuing with the strategy", step.__name__)
+
+    signals = []
+    try:
+        assets = _resolve_assets(trade, args.assets)
+        if not assets:
+            logger.error("No tradable assets left in --assets; skipping strategy")
+        else:
+            assets = _open_market_assets(trade, assets)
+        if assets:
+            if risk.in_trading_window():
+                logger.info("Inside trading window (%s); checking %s for entries", risk.window_label(), ", ".join(assets))
+            signals = build_strategy(args.strategy, trade, assets).generate_signals()
+            if not signals:
+                logger.info("No %s signal for %s this run", args.strategy, ", ".join(assets))
+    except Exception:
+        logger.exception("Strategy check failed this run; will retry next run")
+    # Always runs: reconciles take-profits and manages option stops/flatten.
+    risk.process_strategy_signals(trade, signals)
 
 
 if __name__ == "__main__":

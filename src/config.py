@@ -146,5 +146,14 @@ def _setup_logging() -> None:
         handler.setFormatter(formatter)
         root.addHandler(handler)
 
+    # Scheduled runs discard stderr, so log crashes or they leave no trace.
+    def log_uncaught(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        root.critical("Uncaught exception; run aborted", exc_info=(exc_type, exc_value, exc_traceback))
+
+    sys.excepthook = log_uncaught
+
 
 _setup_logging()

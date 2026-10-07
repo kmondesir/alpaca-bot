@@ -325,14 +325,14 @@ def in_trading_window(now: Optional[datetime] = None) -> bool:
     return True
 
 
-def _window_label() -> str:
+def window_label() -> str:
     start = config.TRADING_START.strftime("%H:%M") if config.TRADING_START else "any time"
     stop = config.TRADING_STOP.strftime("%H:%M") if config.TRADING_STOP else "any time"
     return f"TRADING_START={start}, TRADING_STOP={stop} ET"
 
 
 def _log_outside_window(symbol: str) -> None:
-    logger.info("Outside trading window (%s); blocking new entry for %s", _window_label(), symbol)
+    logger.info("Outside trading window (%s); blocking new entry for %s", window_label(), symbol)
 
 
 def _loss_limit_reached() -> bool:
@@ -389,7 +389,7 @@ def process_strategy_signals(trade, signals: list) -> list:
     if not entries_allowed:
         logger.info(
             "Running outside trading window (%s, now %s ET); new entries are blocked",
-            _window_label(),
+            window_label(),
             datetime.now(MARKET_TZ).strftime("%H:%M"),
         )
     if not signals:

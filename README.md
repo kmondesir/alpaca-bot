@@ -268,8 +268,14 @@ skipping strategy for ..."); crypto still runs 24/7. `risk.py` checks the clock
 again before each entry as a second guard. Take-profit reconciliation still runs
 when the market is closed.
 
-The script runs once and exits; it does not poll. In production it is run
-every 60 seconds by a cron job, for example:
+The script runs once and exits; it does not poll. Each run re-checks every
+asset for a signal, so the bot gets one chance to enter per run throughout
+the trading window, and logs "Inside trading window ...; checking ... for
+entries" each time. Housekeeping (crypto stops, order sync), the asset
+lookup and the strategy check are each guarded, so a failure in one is
+logged and the run continues. Uncaught exceptions are written to the log
+file too, since scheduled runs usually discard stderr. In production it is
+run every 60 seconds by a cron job, for example:
 
 ```cron
 * * * * * cd /path/to/alpaca && .venv/bin/python src/start.py --assets SPY,AAPL
