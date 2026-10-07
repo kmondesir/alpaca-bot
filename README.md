@@ -43,6 +43,8 @@ TRADING_STOP=0
 
 OPTION_STOP_LOSS=0.5
 OPTION_FLATTEN_TIME=15:45
+GEX_FILTER=true
+GEX_THRESHOLD=0
 ```
 
 | Variable               | Default          | Description                                                                                                                     |
@@ -69,6 +71,8 @@ OPTION_FLATTEN_TIME=15:45
 | `TRADING_STOP`         | `0`              | US/Eastern `HH:MM` from which no new entries are opened, e.g. `15:30`; `0` disables it.                                         |
 | `OPTION_STOP_LOSS`     | `0.5`            | Fraction of an option's premium lost that closes it. For example, `0.5` closes at a 50% loss; `0` disables it.                  |
 | `OPTION_FLATTEN_TIME`  | `15:45`          | US/Eastern `HH:MM` after which options expiring that day are closed.                                                            |
+| `GEX_FILTER`           | `true`           | 0DTE strategy only trades when the underlying's dealer net gamma exposure (GEX) is negative. `false` turns the filter off.      |
+| `GEX_THRESHOLD`        | `0`              | Net GEX, in dollars per 1% move, must be below `-GEX_THRESHOLD`. `0` accepts any negative GEX.                                  |
 
 ### Risk management
 
@@ -173,7 +177,7 @@ python src/start.py --assets SPY,QQQ --strategy 0dte_macd_divergence
 | Strategy               | Trades         | Description                                                              |
 | ---------------------- | -------------- | ------------------------------------------------------------------------ |
 | `macd_psar` (default)  | Stocks, crypto | 15-minute MACD crossover confirmed by 1- and 5-minute Parabolic SAR.     |
-| `0dte_macd_divergence` | 0DTE options   | 5-minute MACD divergence, 1-minute MACD cross, 15-minute histogram turn. |
+| `0dte_macd_divergence` | 0DTE options   | 5-minute MACD divergence, 1-minute MACD cross, 15-minute histogram turn, negative GEX. |
 
 `open_position` submits a market order sized by risk using `WAGER` from `.env`.
 `close_position` closes a tracked position. Both require `STATE=true` and an
@@ -217,9 +221,17 @@ skipped. A signal needs three timeframes to agree:
    high with a lower MACD high above zero is bearish. The second swing must be
    at most 6 bars (30 minutes) old.
 2. **1-minute trigger:** MACD crosses its signal line in the same direction on
-   the latest closed bar.
+   the latest closed bar. For calls, the cross must happen below the zero line
+   (MACD and signal both negative); for puts, above it (both positive).
 3. **15-minute momentum:** the MACD histogram is rising (bullish) or falling
    (bearish).
+4. **Gamma filter** (`GEX_FILTER`): dealer net gamma exposure on the
+   underlying must be negative (below `-GEX_THRESHOLD`). GEX is the sum of
+   gamma × open interest × 100 × spot² × 1% across contracts expiring today,
+   with calls counted positive and puts negative. In negative gamma, dealer
+   hedging amplifies moves instead of damping them. Gamma comes from Alpaca's
+   option chain snapshot and open interest from the contracts list (as of the
+   prior close). If GEX can't be computed, the signal is skipped.
 
 Entry hours come from `TRADING_START`/`TRADING_STOP`; for 0DTE, a stop well
 before `OPTION_FLATTEN_TIME` (e.g. `15:00`) leaves time for a trade to work.
