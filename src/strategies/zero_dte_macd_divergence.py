@@ -19,8 +19,15 @@ calls positive and puts negative. If GEX can't be computed, the trade is skipped
 
 A long view buys the nearest-the-money call expiring today; a short view buys
 the nearest-the-money put. Only underlyings with same-day expirations (e.g.
-SPY, QQQ, IWM) can trade. Exits are handled by risk.py: take-profit limit,
-OPTION_STOP_LOSS, and a forced flatten at OPTION_FLATTEN_TIME.
+SPY, QQQ, IWM, or the indexes SPX and XSP) can trade. Exits are handled by
+risk.py: take-profit limit, OPTION_STOP_LOSS, and a forced flatten at
+OPTION_FLATTEN_TIME.
+
+Index bars (SPX, XSP, from --indexes) come from Yahoo Finance; stock bars from
+Alpaca. Today's option chain (open interest, gamma, bid/ask) is fetched once a
+direction is found: from MarketData.app when MARKETDATA_API_KEY is set,
+otherwise from Yahoo Finance, whose gamma is Black-Scholes gamma from implied
+volatility. The chosen contract must also be tradable on Alpaca.
 """
 
 import logging
@@ -28,14 +35,13 @@ from datetime import datetime, time, timezone
 from typing import Literal, Optional
 from zoneinfo import ZoneInfo
 
-from alpaca.data.requests import OptionChainRequest, OptionLatestQuoteRequest
-from alpaca.trading.enums import ContractType
-from alpaca.trading.requests import GetOptionContractsRequest
+from alpaca.common.exceptions import APIError
 
 import config
+from market_data import MarketDataAppClient, OptionQuote, YahooFinanceDataClient, YahooOptionChainClient
 from symbols import is_crypto_symbol, is_option_symbol, normalize_symbol
 
-from .base import Signal, closed_bars
+from .base import Signal, closed_bars, closed_index_bars
 from .indicators import macd
 
 logger = logging.getLogger(__name__)
@@ -55,8 +61,31 @@ STRIKE_RANGE = 0.03
 CONTRACT_CANDIDATES = 5
 # Maximum (ask - bid) / mid for a contract to be tradable.
 MAX_SPREAD = 0.15
+# Monthly index options settle at the open, so they stop trading the day before
+# they expire; same-day entries use the PM-settled roots (SPXW, NDXP, RUTW).
+AM_SETTLED_ROOTS = {"SPX", "NDX", "RUT"}
 
 Direction = Literal["long", "short"]
+
+
+def _option_root(contract_symbol: str) -> str:
+    """OCC root, e.g. SPXW from SPXW261007C07800000 (expiry, type and strike are 15 characters)."""
+    return contract_symbol[:-15]
+
+
+def _spread_ok(bid: float, ask: float) -> bool:
+    return bid > 0 and ask > 0 and (ask - bid) / ((ask + bid) / 2) <= MAX_SPREAD
+
+
+def chain_gex(chain: list[OptionQuote], spot: float) -> Optional[float]:
+    """Dealer net GEX in dollars per 1% move from a MarketData.app chain, or None without data."""
+    counted = [quote for quote in chain if quote.open_interest and quote.gamma is not None]
+    if not counted:
+        return None
+    return sum(
+        (1 if quote.side == "call" else -1) * quote.gamma * quote.open_interest * 100 * spot * spot * 0.01
+        for quote in counted
+    )
 
 
 def _pivots(values: list[float], start: int, kind: Literal["low", "high"]) -> list[int]:
@@ -149,64 +178,48 @@ def direction_from_bars(
 
 
 class ZeroDteMacdDivergenceStrategy:
-    def __init__(self, data_client, trading_client, option_data_client, symbols: tuple[str, ...]):
+    def __init__(
+        self,
+        data_client,
+        trading_client,
+        option_chain_client,
+        symbols: tuple[str, ...],
+        indexes: tuple[str, ...] = (),
+        index_data_client=None,
+    ):
         self.data_client = data_client
         self.trading_client = trading_client
-        self.option_data_client = option_data_client
+        self.option_chain_client = option_chain_client
+        self.index_data_client = index_data_client
         normalized = dict.fromkeys(normalize_symbol(symbol) for symbol in symbols if symbol.strip())
         unsupported = [symbol for symbol in normalized if is_crypto_symbol(symbol) or is_option_symbol(symbol)]
         for symbol in unsupported:
             logger.warning("0DTE strategy needs an optionable stock or ETF; skipping %s", symbol)
-        self.symbols = tuple(symbol for symbol in normalized if symbol not in unsupported)
+        self.indexes = tuple(dict.fromkeys(normalize_symbol(symbol) for symbol in indexes if symbol.strip()))
+        stocks = tuple(symbol for symbol in normalized if symbol not in unsupported and symbol not in self.indexes)
+        self.symbols = stocks + self.indexes
 
     @classmethod
-    def from_trade(cls, trade, symbols: tuple[str, ...]) -> "ZeroDteMacdDivergenceStrategy":
-        return cls(trade.stock_data, trade.client, trade.option_data, symbols)
+    def from_trade(
+        cls, trade, symbols: tuple[str, ...], indexes: tuple[str, ...] = ()
+    ) -> "ZeroDteMacdDivergenceStrategy":
+        option_chain_client = MarketDataAppClient() if config.MARKETDATA_API_KEY else YahooOptionChainClient()
+        return cls(trade.stock_data, trade.client, option_chain_client, symbols, indexes, YahooFinanceDataClient())
 
     def _closed_bars(self, symbol: str, minutes: int) -> list:
+        if symbol in self.indexes:
+            return closed_index_bars(self.index_data_client, symbol, minutes)
         return closed_bars(self.data_client, None, symbol, minutes)
 
-    def net_gex(self, underlying: str, spot: float, today) -> Optional[float]:
-        """Dealer net gamma exposure in dollars per 1% move for contracts expiring today."""
-        open_interest = {}
-        page_token = None
-        while True:
-            response = self.trading_client.get_option_contracts(
-                GetOptionContractsRequest(
-                    underlying_symbols=[underlying],
-                    expiration_date=today,
-                    limit=10000,
-                    page_token=page_token,
-                )
-            )
-            for contract in response.option_contracts or []:
-                if contract.open_interest:
-                    open_interest[contract.symbol] = (float(contract.open_interest), contract.type)
-            page_token = response.next_page_token
-            if not page_token:
-                break
+    def same_day_chain(self, underlying: str, today) -> list[OptionQuote]:
+        """Contracts on `underlying` expiring today, minus AM-settled index options that no longer trade."""
+        chain = self.option_chain_client.get_option_chain(underlying, today, index=underlying in self.indexes)
+        return [quote for quote in chain if _option_root(quote.symbol) not in AM_SETTLED_ROOTS]
 
-        snapshots = self.option_data_client.get_option_chain(
-            OptionChainRequest(underlying_symbol=underlying, expiration_date=today)
-        )
-        total = 0.0
-        counted = 0
-        for symbol, (interest, contract_type) in open_interest.items():
-            snapshot = snapshots.get(symbol)
-            gamma = snapshot.greeks.gamma if snapshot is not None and snapshot.greeks else None
-            if gamma is None:
-                continue
-            sign = 1 if contract_type == ContractType.CALL else -1
-            total += sign * gamma * interest * 100 * spot * spot * 0.01
-            counted += 1
-        if counted == 0:
-            return None
-        return total
-
-    def gex_allows(self, underlying: str, spot: float, today) -> bool:
+    def gex_allows(self, underlying: str, spot: float, chain: list[OptionQuote]) -> bool:
         if not config.GEX_FILTER:
             return True
-        gex = self.net_gex(underlying, spot, today)
+        gex = chain_gex(chain, spot)
         if gex is None:
             logger.info("Skipping %s: no gamma/open interest data to compute GEX", underlying)
             return False
@@ -216,39 +229,30 @@ class ZeroDteMacdDivergenceStrategy:
         logger.info("Net GEX for %s is %.0f (negative gamma); trading", underlying, gex)
         return True
 
-    def select_contract(self, underlying: str, direction: Direction, price: float, today) -> Optional[str]:
+    def _alpaca_tradable(self, contract_symbol: str) -> bool:
+        try:
+            return bool(self.trading_client.get_option_contract(contract_symbol).tradable)
+        except APIError as error:
+            logger.info("Alpaca has no tradable %s: %s", contract_symbol, error)
+            return False
+
+    def select_contract(
+        self, underlying: str, direction: Direction, price: float, chain: list[OptionQuote]
+    ) -> Optional[str]:
         """Return the nearest-the-money contract expiring today with an acceptable spread."""
-        contract_type = ContractType.CALL if direction == "long" else ContractType.PUT
-        response = self.trading_client.get_option_contracts(
-            GetOptionContractsRequest(
-                underlying_symbols=[underlying],
-                expiration_date=today,
-                type=contract_type,
-                strike_price_gte=f"{price * (1 - STRIKE_RANGE):.2f}",
-                strike_price_lte=f"{price * (1 + STRIKE_RANGE):.2f}",
-                limit=500,
-            )
-        )
-        contracts = [contract for contract in (response.option_contracts or []) if contract.tradable]
+        side = "call" if direction == "long" else "put"
+        contracts = [
+            quote for quote in chain if quote.side == side and abs(quote.strike - price) <= price * STRIKE_RANGE
+        ]
         if not contracts:
-            logger.info("No %s contracts expiring %s for %s", contract_type.value, today, underlying)
+            logger.info("No %s contracts expiring today for %s", side, underlying)
             return None
 
-        contracts.sort(key=lambda contract: abs(float(contract.strike_price) - price))
-        candidates = [contract.symbol for contract in contracts[:CONTRACT_CANDIDATES]]
-        quotes = self.option_data_client.get_option_latest_quote(
-            OptionLatestQuoteRequest(symbol_or_symbols=candidates)
-        )
-        for symbol in candidates:
-            quote = quotes.get(symbol)
-            if quote is None:
-                continue
-            bid, ask = float(quote.bid_price or 0), float(quote.ask_price or 0)
-            if bid <= 0 or ask <= 0:
-                continue
-            if (ask - bid) / ((ask + bid) / 2) <= MAX_SPREAD:
-                return symbol
-        logger.info("No %s contract for %s has a spread within %.0f%%", contract_type.value, underlying, MAX_SPREAD * 100)
+        contracts.sort(key=lambda quote: abs(quote.strike - price))
+        for quote in contracts[:CONTRACT_CANDIDATES]:
+            if _spread_ok(quote.bid, quote.ask) and self._alpaca_tradable(quote.symbol):
+                return quote.symbol
+        logger.info("No %s contract for %s has a spread within %.0f%%", side, underlying, MAX_SPREAD * 100)
         return None
 
     def evaluate(self, symbol: str, now: Optional[datetime] = None) -> Signal | None:
@@ -264,9 +268,12 @@ class ZeroDteMacdDivergenceStrategy:
             return None
 
         trigger_bar = trigger_bars[-1]
-        if not self.gex_allows(symbol, float(trigger_bar.close), today):
+        spot = float(trigger_bar.close)
+        # Fetched only once a direction is found: MarketData.app charges a credit per contract.
+        chain = self.same_day_chain(symbol, today)
+        if not self.gex_allows(symbol, spot, chain):
             return None
-        contract = self.select_contract(symbol, direction, float(trigger_bar.close), today)
+        contract = self.select_contract(symbol, direction, spot, chain)
         if contract is None:
             return None
         option_kind = "call" if direction == "long" else "put"

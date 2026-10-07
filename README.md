@@ -45,6 +45,7 @@ OPTION_STOP_LOSS=0.5
 OPTION_FLATTEN_TIME=15:45
 GEX_FILTER=true
 GEX_THRESHOLD=0
+MARKETDATA_API_KEY=
 ```
 
 | Variable               | Default          | Description                                                                                                                     |
@@ -73,6 +74,7 @@ GEX_THRESHOLD=0
 | `OPTION_FLATTEN_TIME`  | `15:45`          | US/Eastern `HH:MM` after which options expiring that day are closed.                                                            |
 | `GEX_FILTER`           | `true`           | 0DTE strategy only trades when the underlying's dealer net gamma exposure (GEX) is negative. `false` turns the filter off.      |
 | `GEX_THRESHOLD`        | `0`              | Net GEX, in dollars per 1% move, must be below `-GEX_THRESHOLD`. `0` accepts any negative GEX.                                  |
+| `MARKETDATA_API_KEY`   | _(empty)_        | [MarketData.app](https://www.marketdata.app/) key for 0DTE option chains (open interest, gamma, bid/ask). Empty uses Yahoo Finance. |
 
 ### Risk management
 
@@ -169,7 +171,14 @@ accepted as an alias for `BTC/USD`:
 python src/start.py --assets SPY
 python src/start.py --assets SPY,AAPL,BTC/USD
 python src/start.py --assets SPY,QQQ --strategy 0dte_macd_divergence
+python src/start.py --assets SPY,QQQ --indexes SPX --strategy 0dte_macd_divergence
 ```
+
+`--indexes` lists index underlyings such as `SPX` or `XSP` (a leading `^` is
+optional) for `0dte_macd_divergence`; other strategies reject it. Indexes
+skip the Alpaca asset lookup, and their bars come from Yahoo Finance (`^SPX`),
+since Alpaca has no index price data. An index passed in `--assets` instead is
+skipped with an error.
 
 `--strategy` selects the strategy from `src/strategies/`; it defaults to
 `macd_psar`.
@@ -182,7 +191,7 @@ python src/start.py --assets SPY,QQQ --strategy 0dte_macd_divergence
 `open_position` submits a market order sized by risk using `WAGER` from `.env`.
 `close_position` closes a tracked position. Both require `STATE=true` and an
 open market; the read-only commands do not require `STATE`. With no subcommand,
-the scheduled strategy requires the `--assets` argument.
+the scheduled strategy requires `--assets`, `--indexes`, or both.
 
 ### Strategies
 
@@ -212,9 +221,13 @@ Crypto position sizing uses non-marginable buying power.
 
 #### `0dte_macd_divergence`
 
-Trades options that expire the same day on the underlyings in `--assets`, so
-use tickers with daily expirations such as `SPY`, `QQQ`, or `IWM`; crypto is
-skipped. A signal needs three timeframes to agree:
+Trades options that expire the same day on the underlyings in `--assets` and
+`--indexes`, so use tickers with daily expirations such as `SPY`, `QQQ`,
+`IWM`, `SPX`, or `XSP`; crypto is skipped. For SPX, only the PM-settled `SPXW`
+contracts are used: AM-settled monthly `SPX`, `NDX`, and `RUT` options stop
+trading the day before they expire. SPX contracts cost about ten times as
+much as SPY's, so `WAGER` may only cover one, or none. A signal needs three
+timeframes to agree:
 
 1. **5-minute setup:** a regular MACD divergence within today's session. A
    lower swing low with a higher MACD low below zero is bullish; a higher swing
@@ -229,9 +242,22 @@ skipped. A signal needs three timeframes to agree:
    underlying must be negative (below `-GEX_THRESHOLD`). GEX is the sum of
    gamma × open interest × 100 × spot² × 1% across contracts expiring today,
    with calls counted positive and puts negative. In negative gamma, dealer
-   hedging amplifies moves instead of damping them. Gamma comes from Alpaca's
-   option chain snapshot and open interest from the contracts list (as of the
-   prior close). If GEX can't be computed, the signal is skipped.
+   hedging amplifies moves instead of damping them. If GEX can't be computed,
+   the signal is skipped.
+
+Today's option chain is fetched only after a direction is found, once per
+signal, and feeds both the GEX filter and contract selection:
+
+- With `MARKETDATA_API_KEY` set, it comes from MarketData.app, including its
+  gamma. Each contract returned costs one API credit; a full SPX 0DTE chain is
+  about 500 contracts.
+- Otherwise it comes from Yahoo Finance through `yfinance`. Yahoo has no
+  greeks, so gamma is Black-Scholes gamma from each contract's implied
+  volatility and the time left to the 16:00 ET close. It is approximate, but
+  the filter only uses the sign of the total.
+
+Open interest is as of the prior close in both. The chosen contract must also
+be tradable on Alpaca.
 
 Entry hours come from `TRADING_START`/`TRADING_STOP`; for 0DTE, a stop well
 before `OPTION_FLATTEN_TIME` (e.g. `15:00`) leaves time for a trade to work.
