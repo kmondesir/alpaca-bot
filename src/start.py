@@ -10,6 +10,7 @@ from typing import Optional
 from alpaca.common.exceptions import APIError
 from alpaca.trading.enums import AssetClass, AssetStatus
 from alpaca.trading.requests import GetAssetsRequest
+from pydantic import ValidationError
 
 import config
 import risk
@@ -73,6 +74,10 @@ def _tradable_stock(trade: Trade, symbol: str) -> bool:
         if error.status_code != 404:
             raise
         logger.error("Skipping %s: Alpaca has no stock or crypto pair by that name", symbol)
+        return False
+    except ValidationError:
+        # alpaca-py can't parse some asset classes, e.g. indexes such as SPX or VIX (us_index).
+        logger.error("Skipping %s: not a stock or crypto pair the Alpaca SDK can trade (indexes like SPX are not supported)", symbol)
         return False
     if not asset.tradable:
         logger.error("Skipping %s: Alpaca lists %s as not tradable", symbol, asset.name)
