@@ -13,14 +13,19 @@ STRATEGIES = {
     "0dte_macd_divergence": ZeroDteMacdDivergenceStrategy,
 }
 DEFAULT_STRATEGY = "macd_psar"
+# Strategies that accept --indexes (index underlyings such as SPX).
+INDEX_STRATEGIES = {"0dte_macd_divergence"}
 
 
-def build_strategy(name: str, trade, symbols: tuple[str, ...]):
+def build_strategy(name: str, trade, symbols: tuple[str, ...], indexes: tuple[str, ...] = ()):
+    if indexes:
+        return STRATEGIES[name].from_trade(trade, symbols, indexes)
     return STRATEGIES[name].from_trade(trade, symbols)
 
 
 __all__ = [
     "DEFAULT_STRATEGY",
+    "INDEX_STRATEGIES",
     "STRATEGIES",
     "MacdPsarStrategy",
     "Signal",

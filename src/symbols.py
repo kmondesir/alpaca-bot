@@ -6,6 +6,8 @@ from typing import Optional
 
 # OCC option symbol, e.g. SPY261004C00575000: root, YYMMDD expiry, C/P, strike x 1000.
 _OPTION_SYMBOL = re.compile(r"^([A-Z]{1,6})(\d{6})([CP])(\d{8})$")
+# Index option roots that differ from their index, e.g. SPXW (daily, PM-settled) options on SPX.
+_INDEX_OPTION_ROOTS = {"SPXW": "SPX", "NDXP": "NDX", "RUTW": "RUT"}
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -25,7 +27,9 @@ def is_option_symbol(symbol: str) -> bool:
 
 def option_underlying(symbol: str) -> Optional[str]:
     match = _OPTION_SYMBOL.match(normalize_symbol(symbol))
-    return match.group(1) if match else None
+    if match is None:
+        return None
+    return _INDEX_OPTION_ROOTS.get(match.group(1), match.group(1))
 
 
 def option_expiration(symbol: str) -> Optional[date]:

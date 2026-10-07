@@ -15,7 +15,7 @@ from pydantic import ValidationError
 import config
 import risk
 from db import OrderDB
-from strategies import DEFAULT_STRATEGY, STRATEGIES, Signal, build_strategy
+from strategies import DEFAULT_STRATEGY, INDEX_STRATEGIES, STRATEGIES, Signal, build_strategy
 from symbols import is_crypto_symbol, normalize_symbol
 from trade import Trade
 
@@ -27,6 +27,16 @@ def _parse_assets(value: str) -> tuple[str, ...]:
     if not assets:
         raise argparse.ArgumentTypeError("expected at least one asset")
     return assets
+
+
+def _parse_indexes(value: str) -> tuple[str, ...]:
+    indexes = tuple(dict.fromkeys(normalize_symbol(item).lstrip("^") for item in value.split(",") if item.strip()))
+    if not indexes:
+        raise argparse.ArgumentTypeError("expected at least one index")
+    crypto = [index for index in indexes if is_crypto_symbol(index)]
+    if crypto:
+        raise argparse.ArgumentTypeError(f"not an index: {', '.join(crypto)}")
+    return indexes
 
 
 def _resolve_assets(trade: Trade, assets: tuple[str, ...]) -> tuple[str, ...]:
@@ -77,7 +87,7 @@ def _tradable_stock(trade: Trade, symbol: str) -> bool:
         return False
     except ValidationError:
         # alpaca-py can't parse some asset classes, e.g. indexes such as SPX or VIX (us_index).
-        logger.error("Skipping %s: not a stock or crypto pair the Alpaca SDK can trade (indexes like SPX are not supported)", symbol)
+        logger.error("Skipping %s: not a stock or crypto pair; pass indexes such as SPX with --indexes", symbol)
         return False
     if not asset.tradable:
         logger.error("Skipping %s: Alpaca lists %s as not tradable", symbol, asset.name)
@@ -90,7 +100,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--assets",
         type=_parse_assets,
-        help="required comma-separated assets for a scheduled strategy run, e.g. SPY,AAPL,BTC/USD",
+        help="comma-separated assets for a scheduled strategy run, e.g. SPY,AAPL,BTC/USD",
+    )
+    parser.add_argument(
+        "--indexes",
+        type=_parse_indexes,
+        help="comma-separated index underlyings for 0dte_macd_divergence, e.g. SPX,XSP (bars from Yahoo Finance)",
     )
     parser.add_argument(
         "--strategy",
@@ -194,8 +209,10 @@ def _run_command(args, trade: Trade, db: OrderDB) -> None:
 def main(argv: Optional[list[str]] = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    if args.command is None and not args.assets:
-        parser.error("--assets is required when running the scheduled strategy")
+    if args.command is None and not args.assets and not args.indexes:
+        parser.error("--assets or --indexes is required when running the scheduled strategy")
+    if args.indexes and args.strategy not in INDEX_STRATEGIES:
+        parser.error(f"--indexes is only supported by {', '.join(sorted(INDEX_STRATEGIES))}")
     if args.command is None and not config.STATE:
         logger.info("STATE is off; exiting without running")
         return
@@ -233,17 +250,24 @@ def _run_strategy(args, trade: Trade) -> None:
 
     signals = []
     try:
-        assets = _resolve_assets(trade, args.assets)
-        if not assets:
-            logger.error("No tradable assets left in --assets; skipping strategy")
-        else:
-            assets = _open_market_assets(trade, assets)
-        if assets:
+        assets = _resolve_assets(trade, args.assets) if args.assets else ()
+        if args.assets and not assets:
+            logger.error("No tradable assets left in --assets")
+        # Indexes skip the Alpaca asset lookup: alpaca-py can't parse index assets.
+        indexes = tuple(index for index in args.indexes or () if index not in assets)
+        underlyings = _open_market_assets(trade, assets + indexes) if assets or indexes else ()
+        if underlyings:
             if risk.in_trading_window():
-                logger.info("Inside trading window (%s); checking %s for entries", risk.window_label(), ", ".join(assets))
-            signals = build_strategy(args.strategy, trade, assets).generate_signals()
+                logger.info("Inside trading window (%s); checking %s for entries", risk.window_label(), ", ".join(underlyings))
+            strategy = build_strategy(
+                args.strategy,
+                trade,
+                tuple(symbol for symbol in underlyings if symbol not in indexes),
+                tuple(symbol for symbol in underlyings if symbol in indexes),
+            )
+            signals = strategy.generate_signals()
             if not signals:
-                logger.info("No %s signal for %s this run", args.strategy, ", ".join(assets))
+                logger.info("No %s signal for %s this run", args.strategy, ", ".join(underlyings))
     except Exception:
         logger.exception("Strategy check failed this run; will retry next run")
     # Always runs: reconciles take-profits and manages option stops/flatten.
