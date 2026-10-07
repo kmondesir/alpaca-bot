@@ -53,13 +53,11 @@ DB_PATH = ROOT_DIR / os.getenv("DB_PATH", "data/alpaca.db")
 WAGER = float(os.getenv("WAGER", "0.04"))
 # TAKE_PROFIT: fraction above the fill price at which the take-profit sell exits.
 TAKE_PROFIT = float(os.getenv("TAKE_PROFIT", "0.5"))
-# STOP_LOSS: fraction below the running high-water mark that triggers the stop-loss.
+# STOP_LOSS: trailing-stop distance below the running high for stocks, crypto and options.
 STOP_LOSS = float(os.getenv("STOP_LOSS", "0.05"))
 # MAX_CONSECUTIVE_LOSSES: after this many losing trades in a row, STATE is switched off.
 MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSS", "5"))
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
-# OPTION_STOP_LOSS: fraction of the option premium lost that closes the position.
-OPTION_STOP_LOSS = float(os.getenv("OPTION_STOP_LOSS", "0.5"))
 # OPTION_FLATTEN_TIME: US/Eastern HH:MM after which same-day-expiry options are closed.
 OPTION_FLATTEN_TIME = os.getenv("OPTION_FLATTEN_TIME", "15:45")
 # GEX_FILTER: 0DTE entries only when the underlying's dealer net gamma exposure is negative.

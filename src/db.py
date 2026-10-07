@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS parent (
     close_costs     REAL,
     close_side      TEXT,
     close_quantity  REAL,
-    close_type      TEXT
+    close_type      TEXT,
+    stop_price      REAL
 )
 """
 
@@ -69,6 +70,9 @@ class OrderDB:
             self.conn.execute("DROP TABLE IF EXISTS orders")
             self.conn.execute(_PARENT_SCHEMA)
             self.conn.execute(_CHILD_SCHEMA)
+            columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(parent)")}
+            if "stop_price" not in columns:
+                self.conn.execute("ALTER TABLE parent ADD COLUMN stop_price REAL")
 
     def create_parent(
         self,
@@ -313,6 +317,14 @@ class OrderDB:
             statuses,
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def set_parent_stop(self, parent_id: str, stop_price: float) -> None:
+        """Store the trailing stop the bot enforces itself (options have no Alpaca trailing stop)."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE parent SET stop_price = ?, modified = ? WHERE parent_id = ?",
+                (stop_price, utc_now(), parent_id),
+            )
 
     def mark_parent_closed(self, parent_id: str) -> None:
         with self.conn:

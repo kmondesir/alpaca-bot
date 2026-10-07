@@ -50,7 +50,6 @@ TRADING_START=15:00
 TRADING_STOP=16:00
 
 # Option trading management
-OPTION_STOP_LOSS=0.5
 OPTION_FLATTEN_TIME=20:45
 GEX_FILTER=false
 GEX_THRESHOLD=0
@@ -73,13 +72,12 @@ GEX_THRESHOLD=0
 | `DB_PATH`              | `data/alpaca.db` | SQLite order-tracking database, relative to the project root. Created if missing.                                               |
 | `WAGER`                | `0.04`           | Fraction of account buying power used for a new position. For example, `0.04` sizes a position at 4% of buying power.           |
 | `TAKE_PROFIT`          | `0.5`            | Fraction above the purchase price for the take-profit exit. For example, `0.5` targets 50% above entry; `0` disables it.        |
-| `STOP_LOSS`            | `0.05`           | Trailing-stop distance as a fraction. Stocks: an Alpaca trailing stop that trails the high (long) or low (short). Crypto: a stop-limit starting this fraction below entry, raised each run to this fraction below the bid (must be below `1`). Not used for options. For example, `0.05` trails by 5%; `0` disables it. |
+| `STOP_LOSS`            | `0.05`           | Trailing-stop distance as a fraction. Stocks: an Alpaca trailing stop that trails the high (long) or low (short). Crypto: a stop-limit starting this fraction below entry, raised each run to this fraction below the bid (must be below `1`). Options: kept by the bot this fraction below the bid, raised each run and never lowered; the option is sold once the bid falls to it. For example, `0.05` trails by 5%; `0` disables it. |
 | `MAX_CONSECUTIVE_LOSS` | `5`              | Consecutive losing trades allowed before the bot sets `STATE=false` in `.env`; `0` disables this kill switch.                   |
 | `MAX_OPEN_POSITIONS`   | `3`              | Maximum number of distinct open positions. Pending orders reserve a slot; additional orders for an existing symbol are allowed. |
 | `LOSS_DIRECTORY`       | `status`         | Directory, relative to the project root, for `losses.json`, which stores loss history and the consecutive-loss count.           |
 | `TRADING_START`        | `0`              | US/Eastern `HH:MM` before which no new entries are opened, e.g. `09:45`; `0` disables it.                                       |
 | `TRADING_STOP`         | `0`              | US/Eastern `HH:MM` from which no new entries are opened, e.g. `15:30`; `0` disables it.                                         |
-| `OPTION_STOP_LOSS`     | `0.5`            | Fraction of an option's premium lost that closes it. For example, `0.5` closes at a 50% loss; `0` disables it.                  |
 | `OPTION_FLATTEN_TIME`  | `15:45`          | US/Eastern `HH:MM` after which options expiring that day are closed.                                                            |
 | `GEX_FILTER`           | `true`           | 0DTE strategy only trades when the underlying's dealer net gamma exposure (GEX) is negative. `false` turns the filter off.      |
 | `GEX_THRESHOLD`        | `0`              | Net GEX, in dollars per 1% move, must be below `-GEX_THRESHOLD`. `0` accepts any negative GEX.                                  |
@@ -280,10 +278,14 @@ waits for a new signal before reversing.
 
 Exits:
 
-- a `TAKE_PROFIT` limit sell (Alpaca has no trailing stops for options, so
-  `STOP_LOSS` is not used);
-- `OPTION_STOP_LOSS`, checked on each run against the position's unrealized
-  loss;
+- a `TAKE_PROFIT` limit sell;
+- a `STOP_LOSS` trailing stop. Alpaca has no trailing stops for options, so
+  the bot keeps the stop itself: each run sets it `STOP_LOSS` below the
+  option's current bid if that is higher than the stored stop, and never
+  lowers it. The first run after entry starts it from the bid, not the fill
+  price, so the bid/ask spread doesn't trigger it at once. When a run finds
+  the bid at or below the stop, the option is sold at market. 0DTE premiums
+  swing hard, so a stock-sized `STOP_LOSS` such as `0.05` exits very quickly;
 - every option expiring that day is closed at `OPTION_FLATTEN_TIME`.
 
 Stop-loss and flatten checks only happen when the script runs, so the
