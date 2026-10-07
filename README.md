@@ -63,7 +63,7 @@ GEX_THRESHOLD=0
 | `DB_PATH`              | `data/alpaca.db` | SQLite order-tracking database, relative to the project root. Created if missing.                                               |
 | `WAGER`                | `0.04`           | Fraction of account buying power used for a new position. For example, `0.04` sizes a position at 4% of buying power.           |
 | `TAKE_PROFIT`          | `0.5`            | Fraction above the purchase price for the take-profit exit. For example, `0.5` targets 50% above entry; `0` disables it.        |
-| `STOP_LOSS`            | `0.05`           | Fraction the trailing stop follows below the running high price. For example, `0.05` trails by 5%; `0` disables it.             |
+| `STOP_LOSS`            | `0.05`           | Trailing-stop distance as a fraction. Stocks: an Alpaca trailing stop that trails the high (long) or low (short). Crypto: a stop-limit starting this fraction below entry, raised each run to this fraction below the bid (must be below `1`). Not used for options. For example, `0.05` trails by 5%; `0` disables it. |
 | `MAX_CONSECUTIVE_LOSS` | `5`              | Consecutive losing trades allowed before the bot sets `STATE=false` in `.env`; `0` disables this kill switch.                   |
 | `MAX_OPEN_POSITIONS`   | `3`              | Maximum number of distinct open positions. Pending orders reserve a slot; additional orders for an existing symbol are allowed. |
 | `LOSS_DIRECTORY`       | `status`         | Directory, relative to the project root, for `losses.json`, which stores loss history and the consecutive-loss count.           |
