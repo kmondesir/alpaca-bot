@@ -522,7 +522,7 @@ class Trade:
                 parent_id=parent_id,
                 child_role="take_profit",
             )
-        # Alpaca has no trailing stops for options; risk.py enforces OPTION_STOP_LOSS instead.
+        # Alpaca has no trailing stops for options; risk.py trails STOP_LOSS for them each run.
         if config.STOP_LOSS > 0 and not option:
             trailing_stop_id = config.new_client_order_id()
             if crypto:

@@ -20,8 +20,8 @@ calls positive and puts negative. If GEX can't be computed, the trade is skipped
 A long view buys the nearest-the-money call expiring today; a short view buys
 the nearest-the-money put. Only underlyings with same-day expirations (e.g.
 SPY, QQQ, IWM, or the indexes SPX and XSP) can trade. Exits are handled by
-risk.py: take-profit limit, OPTION_STOP_LOSS, and a forced flatten at
-OPTION_FLATTEN_TIME.
+risk.py: take-profit limit, a STOP_LOSS trailing stop moved each run, and a
+forced flatten at OPTION_FLATTEN_TIME.
 
 Index bars (SPX, XSP, from --indexes) come from Yahoo Finance; stock bars from
 Alpaca. Today's option chain (open interest, gamma, bid/ask) is fetched once a

@@ -282,29 +282,60 @@ def _close_tracked_option(trade, parent_id: str):
     return trade.close_order(parent_id)
 
 
+def _trail_option_stop(trade, row: dict) -> Optional[str]:
+    """Keep the option's stop STOP_LOSS below its bid, never lowering it.
+
+    Alpaca has no trailing stops for options, so the bot keeps the stop in the
+    parent row and moves it once per run. The first run after entry sets it
+    from the bid, not the fill, so the bid/ask spread doesn't trigger it at
+    once. Returns a close reason when the bid is at or below the stop.
+    """
+    if config.STOP_LOSS <= 0:
+        return None
+    symbol = row["symbol"]
+    stop = row["stop_price"]
+    bid = trade.get_option_quote(symbol)["bid"]
+    if bid <= 0:
+        logger.info("No bid for %s; leaving its stop at %s", symbol, stop)
+        return None
+    if stop is not None and bid <= stop:
+        return f"bid {bid:.2f} is at or below its trailing stop {stop:.2f}"
+    new_stop = round(bid * (1 - config.STOP_LOSS), 2)
+    if stop is None or new_stop > stop:
+        trade.db.set_parent_stop(row["parent_id"], new_stop)
+        logger.info(
+            "%s trailing stop for %s to %.2f (%.0f%% below bid %.2f)",
+            "Set" if stop is None else "Raised",
+            symbol,
+            new_stop,
+            config.STOP_LOSS * 100,
+            bid,
+        )
+    return None
+
+
 def _manage_option_positions(trade) -> None:
-    """Close tracked options that hit OPTION_STOP_LOSS or expire today after OPTION_FLATTEN_TIME."""
+    """Trail each tracked option's STOP_LOSS stop, and close options that hit it or expire today after OPTION_FLATTEN_TIME."""
     parents = [row for row in trade.db.parents_by_status("OPEN") if is_option_symbol(row["symbol"])]
     if not parents or not trade.is_market_open():
         return
     now = datetime.now(MARKET_TZ)
     flatten_at = time.fromisoformat(config.OPTION_FLATTEN_TIME)
-    positions = {
-        normalize_symbol(position.symbol): position
-        for position in trade.client.get_all_positions()
-    }
+    held = {normalize_symbol(position.symbol) for position in trade.client.get_all_positions()}
     for row in parents:
         symbol = row["symbol"]
-        position = positions.get(symbol)
-        if position is None:
+        if symbol not in held:
             continue
-        loss = -float(position.unrealized_plpc or 0)
         if option_expiration(symbol) <= now.date() and now.time() >= flatten_at:
             reason = f"expires today and it is past {config.OPTION_FLATTEN_TIME} ET"
-        elif config.OPTION_STOP_LOSS > 0 and loss >= config.OPTION_STOP_LOSS:
-            reason = f"premium down {loss:.0%} (stop {config.OPTION_STOP_LOSS:.0%})"
         else:
-            continue
+            try:
+                reason = _trail_option_stop(trade, row)
+            except Exception:
+                logger.exception("Could not trail the stop for %s; retrying next run", symbol)
+                continue
+            if reason is None:
+                continue
         logger.info("Closing option %s (%s): %s", symbol, row["parent_id"], reason)
         try:
             _close_tracked_option(trade, row["parent_id"])
