@@ -53,6 +53,8 @@ TRADING_STOP=16:00
 OPTION_FLATTEN_TIME=20:45
 GEX_FILTER=false
 GEX_THRESHOLD=0
+MIN_DELTA=0.30
+MAX_DELTA=0.50
 ```
 
 | Variable               | Default          | Description                                                                                                                     |
@@ -81,6 +83,8 @@ GEX_THRESHOLD=0
 | `OPTION_FLATTEN_TIME`  | `15:45`          | US/Eastern `HH:MM` after which options expiring that day are closed.                                                            |
 | `GEX_FILTER`           | `true`           | 0DTE strategy only trades when the underlying's dealer net gamma exposure (GEX) is negative. `false` turns the filter off.      |
 | `GEX_THRESHOLD`        | `0`              | Net GEX, in dollars per 1% move, must be below `-GEX_THRESHOLD`. `0` accepts any negative GEX.                                  |
+| `MIN_DELTA`            | `0.30`           | Lowest absolute delta a 0DTE contract may have. With `MAX_DELTA`, sets the range the contract is picked from (0 to 1).          |
+| `MAX_DELTA`            | `0.50`           | Highest absolute delta a 0DTE contract may have. Of the contracts in range, the one closest to 0.50 is bought.                  |
 | `MARKETDATA_API_KEY`   | _(empty)_        | [MarketData.app](https://www.marketdata.app/) key for 0DTE option chains (open interest, gamma, bid/ask). Empty uses Yahoo Finance. |
 
 ### Risk management
@@ -271,7 +275,7 @@ Entry hours come from `TRADING_START`/`TRADING_STOP`; for 0DTE, a stop well
 before `OPTION_FLATTEN_TIME` (e.g. `15:00`) leaves time for a trade to work.
 A bullish signal buys a call expiring today and a bearish signal a put. The
 contract must be out of the money (a call's strike above the underlying
-price, a put's below it), have an absolute delta from 0.30 to 0.50, and have a
+price, a put's below it), have an absolute delta from `MIN_DELTA` to `MAX_DELTA` (0.30 to 0.50 by default), and have a
 bid/ask spread within 15% of the mid price. Of those, the one Alpaca can
 trade whose delta is closest to 0.50 is bought (the strike nearest the money,
 so the priciest in the range); if none qualifies, the signal is skipped.

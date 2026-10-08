@@ -18,8 +18,8 @@ gamma x open interest x 100 x spot^2 x 1% over contracts expiring today, with
 calls positive and puts negative. If GEX can't be computed, the trade is skipped.
 
 A long view buys a call expiring today and a short view a put: the
-out-of-the-money contract with an absolute delta from 0.30 to 0.50 that is
-closest to 0.50, with an acceptable spread. Only underlyings with same-day expirations (e.g.
+out-of-the-money contract with an absolute delta from MIN_DELTA to MAX_DELTA
+(0.30 to 0.50 by default) that is closest to 0.50, with an acceptable spread. Only underlyings with same-day expirations (e.g.
 SPY, QQQ, IWM, or the indexes SPX and XSP) can trade. Exits are handled by
 risk.py: take-profit limit, a STOP_LOSS trailing stop moved each run, and a
 forced flatten at OPTION_FLATTEN_TIME.
@@ -60,8 +60,8 @@ MAX_DIVERGENCE_AGE = 6
 # Contracts bought are out of the money (calls strike above the underlying
 # price, puts below) with an absolute delta in this range; the one closest to
 # TARGET_DELTA wins.
-MIN_DELTA = 0.30
-MAX_DELTA = 0.50
+MIN_DELTA = config.MIN_DELTA
+MAX_DELTA = config.MAX_DELTA
 TARGET_DELTA = 0.50
 # Maximum (ask - bid) / mid for a contract to be tradable.
 MAX_SPREAD = 0.15
