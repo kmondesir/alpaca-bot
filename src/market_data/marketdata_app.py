@@ -49,9 +49,10 @@ class MarketDataAppClient:
                 ask=float(ask or 0),
                 open_interest=float(interest or 0),
                 gamma=None if gamma is None else float(gamma),
+                delta=None if delta is None else float(delta),
                 underlying_price=float(price),
             )
-            for symbol, side, strike, bid, ask, interest, gamma, price in zip(
+            for symbol, side, strike, bid, ask, interest, gamma, delta, price in zip(
                 data["optionSymbol"],
                 data["side"],
                 data["strike"],
@@ -59,6 +60,7 @@ class MarketDataAppClient:
                 data["ask"],
                 data["openInterest"],
                 data["gamma"],
+                data["delta"],
                 data["underlyingPrice"],
             )
         ]
