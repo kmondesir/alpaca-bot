@@ -64,6 +64,11 @@ OPTION_FLATTEN_TIME = os.getenv("OPTION_FLATTEN_TIME", "15:45")
 GEX_FILTER = os.getenv("GEX_FILTER", "true").lower() == "true"
 # GEX_THRESHOLD: net GEX (dollars per 1% move) must be below -GEX_THRESHOLD; 0 accepts any negative value.
 GEX_THRESHOLD = float(os.getenv("GEX_THRESHOLD", "0"))
+# MIN_DELTA / MAX_DELTA: absolute delta range for 0DTE contracts; the one closest to 0.50 is bought.
+MIN_DELTA = float(os.getenv("MIN_DELTA", "0.30"))
+MAX_DELTA = float(os.getenv("MAX_DELTA", "0.50"))
+if not 0 <= MIN_DELTA <= MAX_DELTA <= 1:
+    raise ValueError(f"Need 0 <= MIN_DELTA <= MAX_DELTA <= 1, not {MIN_DELTA} and {MAX_DELTA}")
 
 
 def _window_time(name: str) -> Optional[clock_time]:
