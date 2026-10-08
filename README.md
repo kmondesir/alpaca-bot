@@ -256,25 +256,25 @@ Today's option chain is fetched only after a direction is found, once per
 signal, and feeds both the GEX filter and contract selection:
 
 - With `MARKETDATA_API_KEY` set, it comes from MarketData.app, including its
-  gamma. Each contract returned costs one API credit; a full SPX 0DTE chain is
-  about 500 contracts.
+  gamma and delta. Each contract returned costs one API credit; a full SPX
+  0DTE chain is about 500 contracts.
 - Otherwise it comes from Yahoo Finance through `yfinance`. Yahoo has no
-  greeks, so gamma is Black-Scholes gamma from each contract's implied
-  volatility and the time left to the 16:00 ET close. It is approximate, but
-  the filter only uses the sign of the total.
+  greeks, so gamma and delta are Black-Scholes values from each contract's
+  implied volatility and the time left to the 16:00 ET close. They are
+  approximate: the GEX filter only uses the sign of the total, but delta
+  decides which contracts are in range.
 
 Open interest is as of the prior close in both. The chosen contract must also
 be tradable on Alpaca.
 
 Entry hours come from `TRADING_START`/`TRADING_STOP`; for 0DTE, a stop well
 before `OPTION_FLATTEN_TIME` (e.g. `15:00`) leaves time for a trade to work.
-Contracts are bought slightly out of the money: a bullish signal buys the
-call expiring today with the nearest strike above the underlying price, and a
-bearish signal buys the put with the nearest strike below it. At-the-money and
-in-the-money strikes are never bought, and strikes more than 1% from the price
-are not considered. Among the five nearest such strikes, the first with a
-bid/ask spread within 15% of the mid price is bought; if none qualifies, the
-signal is skipped.
+A bullish signal buys a call expiring today and a bearish signal a put. The
+contract must be out of the money (a call's strike above the underlying
+price, a put's below it), have an absolute delta from 0.30 to 0.50, and have a
+bid/ask spread within 15% of the mid price. Of those, the one with the lowest
+ask that Alpaca can trade is bought; if none qualifies, the signal is skipped.
+The log names the contract chosen, its delta and ask.
 `risk.py` buys whole contracts with a day limit order at the ask, sized as
 `WAGER` × options buying power ÷ (ask × 100). It holds one option direction
 per underlying at a time; an opposite signal closes the tracked position and

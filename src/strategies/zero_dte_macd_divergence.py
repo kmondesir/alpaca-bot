@@ -17,18 +17,18 @@ dealer hedging amplifies moves rather than damping them. GEX sums
 gamma x open interest x 100 x spot^2 x 1% over contracts expiring today, with
 calls positive and puts negative. If GEX can't be computed, the trade is skipped.
 
-A long view buys the nearest out-of-the-money call expiring today (strike above
-the underlying price, at most 1% away); a short view buys the nearest
-out-of-the-money put (strike below). Only underlyings with same-day expirations (e.g.
+A long view buys a call expiring today and a short view a put: the cheapest
+(lowest ask) out-of-the-money contract with an absolute delta from 0.30 to
+0.50 and an acceptable spread. Only underlyings with same-day expirations (e.g.
 SPY, QQQ, IWM, or the indexes SPX and XSP) can trade. Exits are handled by
 risk.py: take-profit limit, a STOP_LOSS trailing stop moved each run, and a
 forced flatten at OPTION_FLATTEN_TIME.
 
 Index bars (SPX, XSP, from --indexes) come from Yahoo Finance; stock bars from
-Alpaca. Today's option chain (open interest, gamma, bid/ask) is fetched once a
-direction is found: from MarketData.app when MARKETDATA_API_KEY is set,
-otherwise from Yahoo Finance, whose gamma is Black-Scholes gamma from implied
-volatility. The chosen contract must also be tradable on Alpaca.
+Alpaca. Today's option chain (open interest, gamma, delta, bid/ask) is fetched
+once a direction is found: from MarketData.app when MARKETDATA_API_KEY is set,
+otherwise from Yahoo Finance, whose gamma and delta are Black-Scholes values
+from implied volatility. The chosen contract must also be tradable on Alpaca.
 """
 
 import logging
@@ -57,10 +57,10 @@ MOMENTUM_MINUTES = 15
 PIVOT_WINDOW = 2
 # The second divergence pivot must be at most this many setup bars old.
 MAX_DIVERGENCE_AGE = 6
-# Contracts are slightly out of the money: calls strike above the underlying
-# price, puts below, at most this fraction away.
-MAX_OUT_OF_THE_MONEY = 0.01
-CONTRACT_CANDIDATES = 5
+# Contracts bought are out of the money (calls strike above the underlying
+# price, puts below) with an absolute delta in this range; the cheapest wins.
+MIN_DELTA = 0.30
+MAX_DELTA = 0.50
 # Maximum (ask - bid) / mid for a contract to be tradable.
 MAX_SPREAD = 0.15
 # Monthly index options settle at the open, so they stop trading the day before
@@ -241,34 +241,51 @@ class ZeroDteMacdDivergenceStrategy:
     def select_contract(
         self, underlying: str, direction: Direction, price: float, chain: list[OptionQuote]
     ) -> Optional[str]:
-        """Return the nearest out-of-the-money contract expiring today with an acceptable spread.
+        """Return the cheapest out-of-the-money contract expiring today with delta in range.
 
-        Calls need a strike above `price` and puts one below it, within
-        MAX_OUT_OF_THE_MONEY; at-the-money and in-the-money strikes are skipped.
+        Calls need a strike above `price` and puts one below it, an absolute
+        delta from MIN_DELTA to MAX_DELTA, and an acceptable spread. Of those,
+        the lowest ask that Alpaca can trade wins.
         """
         side = "call" if direction == "long" else "put"
         contracts = [
             quote
             for quote in chain
             if quote.side == side
-            and 0 < (quote.strike - price if side == "call" else price - quote.strike) <= price * MAX_OUT_OF_THE_MONEY
+            and (quote.strike > price if side == "call" else quote.strike < price)
+            and quote.delta is not None
+            and MIN_DELTA <= abs(quote.delta) <= MAX_DELTA
         ]
         if not contracts:
             logger.info(
-                "No %s contracts expiring today for %s within %.0f%% out of the money of %.2f",
+                "No out-of-the-money %s expiring today for %s has delta %.2f-%.2f (price %.2f)",
                 side,
                 underlying,
-                MAX_OUT_OF_THE_MONEY * 100,
+                MIN_DELTA,
+                MAX_DELTA,
                 price,
             )
             return None
 
-        contracts.sort(key=lambda quote: abs(quote.strike - price))
-        for quote in contracts[:CONTRACT_CANDIDATES]:
-            if _spread_ok(quote.bid, quote.ask) and self._alpaca_tradable(quote.symbol):
+        contracts = [quote for quote in contracts if _spread_ok(quote.bid, quote.ask)]
+        for quote in sorted(contracts, key=lambda quote: quote.ask):
+            if self._alpaca_tradable(quote.symbol):
+                logger.info(
+                    "Chose %s for %s: delta %.2f, ask %.2f, cheapest of %d in range",
+                    quote.symbol,
+                    underlying,
+                    quote.delta,
+                    quote.ask,
+                    len(contracts),
+                )
                 return quote.symbol
         logger.info(
-            "No out-of-the-money %s contract for %s has a spread within %.0f%%", side, underlying, MAX_SPREAD * 100
+            "No %s for %s with delta %.2f-%.2f has a spread within %.0f%% and trades on Alpaca",
+            side,
+            underlying,
+            MIN_DELTA,
+            MAX_DELTA,
+            MAX_SPREAD * 100,
         )
         return None
 
