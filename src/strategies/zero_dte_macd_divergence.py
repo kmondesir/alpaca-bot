@@ -17,9 +17,9 @@ dealer hedging amplifies moves rather than damping them. GEX sums
 gamma x open interest x 100 x spot^2 x 1% over contracts expiring today, with
 calls positive and puts negative. If GEX can't be computed, the trade is skipped.
 
-A long view buys a call expiring today and a short view a put: the cheapest
-(lowest ask) out-of-the-money contract with an absolute delta from 0.30 to
-0.50 and an acceptable spread. Only underlyings with same-day expirations (e.g.
+A long view buys a call expiring today and a short view a put: the
+out-of-the-money contract with an absolute delta from 0.30 to 0.50 that is
+closest to 0.50, with an acceptable spread. Only underlyings with same-day expirations (e.g.
 SPY, QQQ, IWM, or the indexes SPX and XSP) can trade. Exits are handled by
 risk.py: take-profit limit, a STOP_LOSS trailing stop moved each run, and a
 forced flatten at OPTION_FLATTEN_TIME.
@@ -58,9 +58,11 @@ PIVOT_WINDOW = 2
 # The second divergence pivot must be at most this many setup bars old.
 MAX_DIVERGENCE_AGE = 6
 # Contracts bought are out of the money (calls strike above the underlying
-# price, puts below) with an absolute delta in this range; the cheapest wins.
+# price, puts below) with an absolute delta in this range; the one closest to
+# TARGET_DELTA wins.
 MIN_DELTA = 0.30
 MAX_DELTA = 0.50
+TARGET_DELTA = 0.50
 # Maximum (ask - bid) / mid for a contract to be tradable.
 MAX_SPREAD = 0.15
 # Monthly index options settle at the open, so they stop trading the day before
@@ -241,11 +243,11 @@ class ZeroDteMacdDivergenceStrategy:
     def select_contract(
         self, underlying: str, direction: Direction, price: float, chain: list[OptionQuote]
     ) -> Optional[str]:
-        """Return the cheapest out-of-the-money contract expiring today with delta in range.
+        """Return the out-of-the-money contract expiring today with delta closest to TARGET_DELTA.
 
         Calls need a strike above `price` and puts one below it, an absolute
         delta from MIN_DELTA to MAX_DELTA, and an acceptable spread. Of those,
-        the lowest ask that Alpaca can trade wins.
+        the one Alpaca can trade with absolute delta closest to TARGET_DELTA wins.
         """
         side = "call" if direction == "long" else "put"
         contracts = [
@@ -268,14 +270,15 @@ class ZeroDteMacdDivergenceStrategy:
             return None
 
         contracts = [quote for quote in contracts if _spread_ok(quote.bid, quote.ask)]
-        for quote in sorted(contracts, key=lambda quote: quote.ask):
+        for quote in sorted(contracts, key=lambda quote: abs(TARGET_DELTA - abs(quote.delta))):
             if self._alpaca_tradable(quote.symbol):
                 logger.info(
-                    "Chose %s for %s: delta %.2f, ask %.2f, cheapest of %d in range",
+                    "Chose %s for %s: delta %.2f, ask %.2f, closest to %.2f of %d in range",
                     quote.symbol,
                     underlying,
                     quote.delta,
                     quote.ask,
+                    TARGET_DELTA,
                     len(contracts),
                 )
                 return quote.symbol

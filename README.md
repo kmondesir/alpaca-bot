@@ -272,8 +272,9 @@ before `OPTION_FLATTEN_TIME` (e.g. `15:00`) leaves time for a trade to work.
 A bullish signal buys a call expiring today and a bearish signal a put. The
 contract must be out of the money (a call's strike above the underlying
 price, a put's below it), have an absolute delta from 0.30 to 0.50, and have a
-bid/ask spread within 15% of the mid price. Of those, the one with the lowest
-ask that Alpaca can trade is bought; if none qualifies, the signal is skipped.
+bid/ask spread within 15% of the mid price. Of those, the one Alpaca can
+trade whose delta is closest to 0.50 is bought (the strike nearest the money,
+so the priciest in the range); if none qualifies, the signal is skipped.
 The log names the contract chosen, its delta and ask.
 `risk.py` buys whole contracts with a day limit order at the ask, sized as
 `WAGER` × options buying power ÷ (ask × 100). It holds one option direction
