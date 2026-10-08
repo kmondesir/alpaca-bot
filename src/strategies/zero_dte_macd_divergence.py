@@ -17,8 +17,9 @@ dealer hedging amplifies moves rather than damping them. GEX sums
 gamma x open interest x 100 x spot^2 x 1% over contracts expiring today, with
 calls positive and puts negative. If GEX can't be computed, the trade is skipped.
 
-A long view buys the nearest-the-money call expiring today; a short view buys
-the nearest-the-money put. Only underlyings with same-day expirations (e.g.
+A long view buys the nearest out-of-the-money call expiring today (strike above
+the underlying price, at most 1% away); a short view buys the nearest
+out-of-the-money put (strike below). Only underlyings with same-day expirations (e.g.
 SPY, QQQ, IWM, or the indexes SPX and XSP) can trade. Exits are handled by
 risk.py: take-profit limit, a STOP_LOSS trailing stop moved each run, and a
 forced flatten at OPTION_FLATTEN_TIME.
@@ -56,8 +57,9 @@ MOMENTUM_MINUTES = 15
 PIVOT_WINDOW = 2
 # The second divergence pivot must be at most this many setup bars old.
 MAX_DIVERGENCE_AGE = 6
-# Strikes considered on each side of the underlying price.
-STRIKE_RANGE = 0.03
+# Contracts are slightly out of the money: calls strike above the underlying
+# price, puts below, at most this fraction away.
+MAX_OUT_OF_THE_MONEY = 0.01
 CONTRACT_CANDIDATES = 5
 # Maximum (ask - bid) / mid for a contract to be tradable.
 MAX_SPREAD = 0.15
@@ -239,20 +241,35 @@ class ZeroDteMacdDivergenceStrategy:
     def select_contract(
         self, underlying: str, direction: Direction, price: float, chain: list[OptionQuote]
     ) -> Optional[str]:
-        """Return the nearest-the-money contract expiring today with an acceptable spread."""
+        """Return the nearest out-of-the-money contract expiring today with an acceptable spread.
+
+        Calls need a strike above `price` and puts one below it, within
+        MAX_OUT_OF_THE_MONEY; at-the-money and in-the-money strikes are skipped.
+        """
         side = "call" if direction == "long" else "put"
         contracts = [
-            quote for quote in chain if quote.side == side and abs(quote.strike - price) <= price * STRIKE_RANGE
+            quote
+            for quote in chain
+            if quote.side == side
+            and 0 < (quote.strike - price if side == "call" else price - quote.strike) <= price * MAX_OUT_OF_THE_MONEY
         ]
         if not contracts:
-            logger.info("No %s contracts expiring today for %s", side, underlying)
+            logger.info(
+                "No %s contracts expiring today for %s within %.0f%% out of the money of %.2f",
+                side,
+                underlying,
+                MAX_OUT_OF_THE_MONEY * 100,
+                price,
+            )
             return None
 
         contracts.sort(key=lambda quote: abs(quote.strike - price))
         for quote in contracts[:CONTRACT_CANDIDATES]:
             if _spread_ok(quote.bid, quote.ask) and self._alpaca_tradable(quote.symbol):
                 return quote.symbol
-        logger.info("No %s contract for %s has a spread within %.0f%%", side, underlying, MAX_SPREAD * 100)
+        logger.info(
+            "No out-of-the-money %s contract for %s has a spread within %.0f%%", side, underlying, MAX_SPREAD * 100
+        )
         return None
 
     def evaluate(self, symbol: str, now: Optional[datetime] = None) -> Signal | None:

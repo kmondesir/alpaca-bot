@@ -268,9 +268,13 @@ be tradable on Alpaca.
 
 Entry hours come from `TRADING_START`/`TRADING_STOP`; for 0DTE, a stop well
 before `OPTION_FLATTEN_TIME` (e.g. `15:00`) leaves time for a trade to work.
-A bullish signal buys the
-nearest-the-money call expiring today; a bearish signal buys the nearest put.
-Contracts with a bid/ask spread wider than 15% of the mid price are skipped.
+Contracts are bought slightly out of the money: a bullish signal buys the
+call expiring today with the nearest strike above the underlying price, and a
+bearish signal buys the put with the nearest strike below it. At-the-money and
+in-the-money strikes are never bought, and strikes more than 1% from the price
+are not considered. Among the five nearest such strikes, the first with a
+bid/ask spread within 15% of the mid price is bought; if none qualifies, the
+signal is skipped.
 `risk.py` buys whole contracts with a day limit order at the ask, sized as
 `WAGER` × options buying power ÷ (ask × 100). It holds one option direction
 per underlying at a time; an opposite signal closes the tracked position and
