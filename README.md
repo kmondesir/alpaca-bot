@@ -183,10 +183,11 @@ python src/start.py --assets SPY
 python src/start.py --assets SPY,AAPL,BTC/USD
 python src/start.py --assets SPY,QQQ --strategy 0dte_macd_divergence
 python src/start.py --assets SPY,QQQ --indexes SPX --strategy 0dte_macd_divergence
+python src/start.py --assets SPY,QQQ --strategy 0dte_macd15_atm
 ```
 
 `--indexes` lists index underlyings such as `SPX` or `XSP` (a leading `^` is
-optional) for `0dte_macd_divergence`; other strategies reject it. Indexes
+optional) for `0dte_macd_divergence` and `0dte_macd15_atm`; other strategies reject it. Indexes
 skip the Alpaca asset lookup, and their bars come from Yahoo Finance (`^SPX`),
 since Alpaca has no index price data. An index passed in `--assets` instead is
 skipped with an error.
@@ -198,6 +199,7 @@ skipped with an error.
 | ---------------------- | -------------- | ------------------------------------------------------------------------ |
 | `macd_psar` (default)  | Stocks, crypto | 15-minute MACD crossover confirmed by 1- and 5-minute Parabolic SAR.     |
 | `0dte_macd_divergence` | 0DTE options   | 5-minute MACD divergence, 1-minute MACD cross, 15-minute histogram turn, negative GEX. |
+| `0dte_macd15_atm`      | 0DTE options   | First 15-minute MACD cross beyond the zero line each day; at-the-money contract. |
 
 `open_position` submits a market order sized by risk using `WAGER` from `.env`.
 `close_position` closes a tracked position. Both require `STATE=true` and an
@@ -300,6 +302,28 @@ Exits:
 Stop-loss and flatten checks only happen when the script runs, so the
 every-minute cron schedule matters. The account must be approved for options
 trading.
+
+#### `0dte_macd15_atm`
+
+Trades the same-day options of the underlyings in `--assets` and `--indexes`
+on one 15-minute MACD(12, 26, 9) signal:
+
+- **Call:** the MACD line crosses above its signal line on a closed 15-minute
+  bar while the MACD line is above zero.
+- **Put:** the MACD line crosses below its signal line while it is below zero.
+- Only the first such cross per underlying per day counts, among bars that
+  close from `TRADING_START` on; a later cross the same day is skipped. The
+  signal is acted on in the runs up to 5 minutes after that bar closes.
+- The contract is the strike nearest the underlying's price (a call or a put,
+  in or out of the money), expiring today, with a bid/ask spread within 15%
+  of the mid price; the next two nearest strikes are tried if it fails.
+- No GEX filter (`GEX_FILTER` and `GEX_THRESHOLD` are not used).
+
+Sizing (`WAGER`), the `STOP_LOSS` trailing stop, `TAKE_PROFIT`,
+`OPTION_FLATTEN_TIME`, `MAX_OPEN_POSITIONS` and the trading window apply as
+for `0dte_macd_divergence`. It was researched with entries from 10:00 to
+14:00, a 20% trailing stop, 20% of the balance per trade and positions closed
+at 15:45.
 
 Set `STATE=true` in `.env` and provide one or more assets, then:
 
