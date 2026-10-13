@@ -27,6 +27,8 @@ class Signal:
     # so a short view is expressed by buying a put rather than selling.
     underlying: Optional[str] = None
     description: Optional[str] = None
+    # Set when the strategy exits on its own rule instead of TAKE_PROFIT and STOP_LOSS (see risk.py).
+    exit_rule: Optional[str] = None
 
     @property
     def is_option(self) -> bool:

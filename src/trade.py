@@ -505,7 +505,8 @@ class Trade:
             if price_increment <= 0:
                 raise ValueError(f"Invalid price increment for {symbol}")
 
-        if config.TAKE_PROFIT > 0:
+        # A strategy exit rule (risk.py) replaces the take-profit.
+        if config.TAKE_PROFIT > 0 and not self.db.get_parent(parent_id).get("exit_rule"):
             take_profit_id = config.new_client_order_id()
             multiplier = 1 + config.TAKE_PROFIT if entry_side == OrderSide.BUY else 1 - config.TAKE_PROFIT
             take_profit_price = _round_to_increment(avg_price * multiplier, price_increment)
