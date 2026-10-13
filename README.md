@@ -353,9 +353,10 @@ Picks at most one 0DTE trade per run from a list of stocks, such as
    rule is stored with the entry (`exit_rule` in the `parent` table) and
    checked by `risk.py` each run.
 
-Most single stocks only list weekly options, so they only have a same-day
-expiry on Fridays (Thursdays before a Friday holiday); on other days this
-strategy finds nothing to trade. Sizing (`WAGER`), `MAX_OPEN_POSITIONS`,
+Whether an underlying has a same-day expiry is read from today's chain on each
+run. In 2026, AAPL, MSFT, AMZN, META, AVGO and TSLA list Monday, Wednesday and
+Friday expirations, and GOOG Fridays only; in 2025 all seven only had Friday
+expirations, so the 2025 backtest only trades on Fridays. Sizing (`WAGER`), `MAX_OPEN_POSITIONS`,
 `MAX_CONSECUTIVE_LOSS` and the trading window apply as for other strategies.
 With no stop, a contract can lose nearly all of its value before the trend
 reverses or the day ends, so `WAGER` caps the loss on each trade.

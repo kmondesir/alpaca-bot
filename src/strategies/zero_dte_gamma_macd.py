@@ -22,9 +22,11 @@ Exits ignore TAKE_PROFIT and STOP_LOSS: a call is sold once the underlying's
 1-minute MACD crosses below its signal line while below zero (a put once it
 crosses above while above zero), counting only bars that close after entry.
 Without a reversal, the option is held until OPTION_FLATTEN_TIME. risk.py
-checks this each run for entries tagged with MACD_REVERSAL_EXIT. Mega-cap stocks such as AAPL or
-TSLA usually list weekly options only, so they trade on their expiry days
-(mostly Fridays).
+checks this each run for entries tagged with MACD_REVERSAL_EXIT.
+
+Whether an underlying has a same-day expiry is read from today's chain: in
+2026, AAPL, MSFT, AMZN, META, AVGO and TSLA list Monday, Wednesday and Friday
+expirations, while GOOG lists Fridays only.
 """
 
 import logging
