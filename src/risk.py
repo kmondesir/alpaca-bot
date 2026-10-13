@@ -30,6 +30,7 @@ from symbols import (
     option_underlying,
 )
 from db import PENDING_STATUSES, utc_now
+from strategies.zero_dte_gamma_macd import MACD_REVERSAL_EXIT, macd_reversal_exit
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +316,11 @@ def _trail_option_stop(trade, row: dict) -> Optional[str]:
 
 
 def _manage_option_positions(trade) -> None:
-    """Trail each tracked option's STOP_LOSS stop, and close options that hit it or expire today after OPTION_FLATTEN_TIME."""
+    """Close tracked options that expire today after OPTION_FLATTEN_TIME, and apply each one's exit.
+
+    Options with a strategy exit rule close when it fires; the rest trail a
+    STOP_LOSS stop and close when it is hit.
+    """
     parents = [row for row in trade.db.parents_by_status("OPEN") if is_option_symbol(row["symbol"])]
     if not parents or not trade.is_market_open():
         return
@@ -328,6 +333,15 @@ def _manage_option_positions(trade) -> None:
             continue
         if option_expiration(symbol) <= now.date() and now.time() >= flatten_at:
             reason = f"expires today and it is past {config.OPTION_FLATTEN_TIME} ET"
+        elif row.get("exit_rule") == MACD_REVERSAL_EXIT:
+            # No stop: held until the trend reverses or OPTION_FLATTEN_TIME.
+            try:
+                reason = macd_reversal_exit(trade.stock_data, symbol, datetime.fromisoformat(row["created"]))
+            except Exception:
+                logger.exception("Could not check the MACD reversal for %s; retrying next run", symbol)
+                continue
+            if reason is None:
+                continue
         else:
             try:
                 reason = _trail_option_stop(trade, row)
@@ -498,6 +512,8 @@ def process_strategy_signals(trade, signals: list) -> list:
                     description=signal.description,
                     client_order_id=client_order_id,
                 )
+                if signal.exit_rule:
+                    trade.db.set_parent_exit_rule(client_order_id, signal.exit_rule)
                 submitted_orders.append(order)
                 occupied_symbols.add(symbol)
                 logger.info("Risk manager submitted %d %s for %s %s view", qty, symbol, signal.underlying, signal.direction)

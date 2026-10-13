@@ -184,6 +184,7 @@ python src/start.py --assets SPY,AAPL,BTC/USD
 python src/start.py --assets SPY,QQQ --strategy 0dte_macd_divergence
 python src/start.py --assets SPY,QQQ --indexes SPX --strategy 0dte_macd_divergence
 python src/start.py --assets SPY,QQQ --strategy 0dte_macd15_atm
+python src/start.py --assets MSFT,AAPL,GOOG,AMZN,META,AVGO,TSLA --strategy 0dte_gamma_macd
 ```
 
 `--indexes` lists index underlyings such as `SPX` or `XSP` (a leading `^` is
@@ -200,6 +201,7 @@ skipped with an error.
 | `macd_psar` (default)  | Stocks, crypto | 15-minute MACD crossover confirmed by 1- and 5-minute Parabolic SAR.     |
 | `0dte_macd_divergence` | 0DTE options   | 5-minute MACD divergence, 1-minute MACD cross, 15-minute histogram turn, negative GEX. |
 | `0dte_macd15_atm`      | 0DTE options   | First 15-minute MACD cross beyond the zero line each day; at-the-money contract. |
+| `0dte_gamma_macd`      | 0DTE options   | 15-minute MACD cross beyond the zero line in positive GEX; the highest-volume underlying with a same-day expiry is traded. |
 
 `open_position` submits a market order sized by risk using `WAGER` from `.env`.
 `close_position` closes a tracked position. Both require `STATE=true` and an
@@ -324,6 +326,48 @@ Sizing (`WAGER`), the `STOP_LOSS` trailing stop, `TAKE_PROFIT`,
 for `0dte_macd_divergence`. It was researched with entries from 10:00 to
 14:00, a 20% trailing stop, 20% of the balance per trade and positions closed
 at 15:45.
+
+#### `0dte_gamma_macd`
+
+Picks at most one 0DTE trade per run from a list of stocks, such as
+`MSFT,AAPL,GOOG,AMZN,META,AVGO,TSLA` in `--assets` (`--indexes` is rejected):
+
+1. **Signal:** on the 15-minute bar that just closed, the MACD(12, 26, 9) line
+   crosses above its signal line while above zero (call) or below it while
+   below zero (put). The signal is acted on in the runs up to 5 minutes after
+   that bar closes.
+2. **Ranking:** underlyings with a signal are sorted by average daily volume
+   over the last 20 sessions (Alpaca IEX daily bars), highest first.
+3. **0DTE and gamma:** going down that list, the first underlying with options
+   expiring today and positive dealer net gamma exposure (GEX above
+   `GEX_THRESHOLD`, computed as for `0dte_macd_divergence`) is traded. In
+   positive gamma, dealer hedging damps moves. `GEX_FILTER` is not used:
+   positive gamma is always required.
+4. **Contract:** as for `0dte_macd_divergence`, the out-of-the-money contract
+   with absolute delta from `MIN_DELTA` to `MAX_DELTA` closest to 0.50.
+5. **Exit:** no take-profit and no stop; `TAKE_PROFIT` and `STOP_LOSS` are
+   ignored for these positions. A call is sold once the underlying's 1-minute
+   MACD crosses below its signal line while below zero, and a put once it
+   crosses above while above zero, counting only bars closed after entry.
+   Without a reversal, the option is held until `OPTION_FLATTEN_TIME`. The
+   rule is stored with the entry (`exit_rule` in the `parent` table) and
+   checked by `risk.py` each run.
+
+Most single stocks only list weekly options, so they only have a same-day
+expiry on Fridays (Thursdays before a Friday holiday); on other days this
+strategy finds nothing to trade. Sizing (`WAGER`), `MAX_OPEN_POSITIONS`,
+`MAX_CONSECUTIVE_LOSS` and the trading window apply as for other strategies.
+With no stop, a contract can lose nearly all of its value before the trend
+reverses or the day ends, so `WAGER` caps the loss on each trade.
+
+`backtests/zero_dte_gamma_macd.py` replays the strategy on a year of Alpaca
+history with the risk settings from `.env` and the same exit; see its
+docstring for the approximations it makes. `--exit-macd-minutes 5` tests
+another exit timeframe, and `0` the `TAKE_PROFIT`/`STOP_LOSS` exits:
+
+```bash
+python backtests/zero_dte_gamma_macd.py --env .env --year 2025
+```
 
 Set `STATE=true` in `.env` and provide one or more assets, then:
 

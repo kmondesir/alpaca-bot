@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS parent (
     close_side      TEXT,
     close_quantity  REAL,
     close_type      TEXT,
-    stop_price      REAL
+    stop_price      REAL,
+    exit_rule       TEXT
 )
 """
 
@@ -73,6 +74,8 @@ class OrderDB:
             columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(parent)")}
             if "stop_price" not in columns:
                 self.conn.execute("ALTER TABLE parent ADD COLUMN stop_price REAL")
+            if "exit_rule" not in columns:
+                self.conn.execute("ALTER TABLE parent ADD COLUMN exit_rule TEXT")
 
     def create_parent(
         self,
@@ -324,6 +327,14 @@ class OrderDB:
             self.conn.execute(
                 "UPDATE parent SET stop_price = ?, modified = ? WHERE parent_id = ?",
                 (stop_price, utc_now(), parent_id),
+            )
+
+    def set_parent_exit_rule(self, parent_id: str, exit_rule: str) -> None:
+        """Store a strategy's own exit (e.g. a MACD reversal) that replaces TAKE_PROFIT and STOP_LOSS."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE parent SET exit_rule = ?, modified = ? WHERE parent_id = ?",
+                (exit_rule, utc_now(), parent_id),
             )
 
     def mark_parent_closed(self, parent_id: str) -> None:
