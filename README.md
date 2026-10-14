@@ -26,7 +26,6 @@ ALPACA_BASE_URL=https://paper-api.alpaca.markets
 ALPACA_API_KEY=
 ALPACA_SECRET_KEY=
 DEMO=true
-STATE=true
 
 # Log file management
 LOG_DIRECTORY=C:\logs\alpaca
@@ -43,7 +42,7 @@ LOG_LEVEL=INFO
 | `ALPACA_SECRET_KEY` | _(empty)_    | Alpaca API secret.                                                                                                      |
 | `ALPACA_BASE_URL`   | _(empty)_    | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`. |
 | `DEMO`              | `true`       | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                        |
-| `STATE`             | `false`      | Kill switch. Orders are only placed or closed when `true`; `--balance` and `--orders` always work.                      |
+| `STATE`             | `false`      | Kill switch. Orders are only placed or closed when `true`; `--balance` and `--orders` always work. Normally set by the caller (see below), not in this `.env`. |
 | `LOG_DIRECTORY`     | `logs`       | Folder for log files, relative to the project root. Created if missing. `--logdirectory` overrides it.                  |
 | `LOG_NAME`          | `alpaca.log` | Log file name. `--logname` overrides it.                                                                                |
 | `MAX_SIZE_IN_MB`    | `10`         | Size at which the log file rotates. Decimals allowed.                                                                   |
@@ -52,6 +51,13 @@ LOG_LEVEL=INFO
 
 Use matching API keys and `ALPACA_BASE_URL` for the same account (paper or
 live). The Alpaca SDK appends `/v2`, so provide only the base URL.
+
+`STATE` is left out of this `.env` because the caller owns the kill switch:
+alpaca-strategies keeps `STATE` in its own `.env` and passes it to every
+`execute.py` run in the environment. A variable already set in the
+environment wins over `.env`. Run on its own, `execute.py` falls back to
+`STATE=false` and places no orders; set `STATE=true` in the environment (or
+add it to this `.env`) to place or close orders by hand.
 
 ## Usage
 
