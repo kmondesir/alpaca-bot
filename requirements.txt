@@ -1,5 +1,2 @@
 alpaca-py
 python-dotenv
-requests
-tzdata
-yfinance
