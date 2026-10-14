@@ -1,5 +1,9 @@
 # alpaca
 
+Order execution for Alpaca. `src/execute.py` opens positions sized in USD,
+looks orders up, and closes them by client order id. It makes no trading decisions:
+strategies, signals, stops and risk limits belong to the caller.
+
 ## Setup
 
 ```bash
@@ -17,111 +21,114 @@ All settings are read from `.env` by `src/config.py`. Any variable left out
 falls back to its default.
 
 ```env
-# API keys
-ALPACA_SECRET_KEY=
-COINMARKETCAP_API_KEY=
-MARKETDATA_API_KEY=
-
 # Broker config
 ALPACA_BASE_URL=https://paper-api.alpaca.markets
 ALPACA_API_KEY=
+ALPACA_SECRET_KEY=
 DEMO=true
 STATE=true
 
-# Log File management
+# Log file management
 LOG_DIRECTORY=C:\logs\alpaca
 LOG_NAME=alpaca.log
 MAX_SIZE_IN_MB=10
 MAX_BACKUP=5
 LOG_LEVEL=INFO
 
-# Order history management
-PREFIX=alpaca-bot
-DB_PATH=data/alpaca.db
-
-# Risk management
-WAGER=0.04
-TAKE_PROFIT=0
-STOP_LOSS=0.05
-MAX_CONSECUTIVE_LOSS=5
-LOSS_DIRECTORY=status
-MAX_OPEN_POSITIONS=3
-TRADING_START=15:00
-TRADING_STOP=16:00
-
-# Option trading management
-OPTION_FLATTEN_TIME=20:45
-GEX_FILTER=false
-GEX_THRESHOLD=0
-MIN_DELTA=0.30
-MAX_DELTA=0.50
 ```
 
-| Variable               | Default          | Description                                                                                                                     |
-| ---------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `ALPACA_API_KEY`       | _(empty)_        | Alpaca API key.                                                                                                                 |
-| `ALPACA_SECRET_KEY`    | _(empty)_        | Alpaca API secret.                                                                                                              |
-| `ALPACA_BASE_URL`      | _(empty)_        | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`.         |
-| `COINMARKETCAP_API_KEY` | _(empty)_       | Optional key for `CoinMarketCapClient`, which retrieves latest cryptocurrency quotes; Binance, Coinbase, and Yahoo Finance do not require it. |
-| `DEMO`                 | `true`           | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                                |
-| `STATE`                | `false`          | Kill switch. The script only runs when `true`; otherwise it logs a message and exits.                                           |
-| `LOG_DIRECTORY`        | `logs`           | Folder for log files, relative to the project root. Created if missing.                                                         |
-| `LOG_NAME`             | `alpaca.log`     | Log file name.                                                                                                                  |
-| `MAX_SIZE_IN_MB`       | `10`             | Size at which the log file rotates. Decimals allowed.                                                                           |
-| `MAX_BACKUP`           | `5`              | Number of rotated files to keep (`alpaca.log.1` … `alpaca.log.5`).                                                              |
-| `LOG_LEVEL`            | `INFO`           | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`.                                                                              |
-| `PREFIX`               | `alpaca`         | Prefix for generated order tags: `client_order_id` is `<PREFIX>-<uuid7>`. Max 91 characters.                                    |
-| `DB_PATH`              | `data/alpaca.db` | SQLite order-tracking database, relative to the project root. Created if missing.                                               |
-| `WAGER`                | `0.04`           | Fraction of account buying power used for a new position. For example, `0.04` sizes a position at 4% of buying power.           |
-| `TAKE_PROFIT`          | `0.5`            | Fraction above the purchase price for the take-profit exit. For example, `0.5` targets 50% above entry; `0` disables it.        |
-| `STOP_LOSS`            | `0.05`           | Trailing-stop distance as a fraction. Stocks: an Alpaca trailing stop that trails the high (long) or low (short). Crypto: a stop-limit starting this fraction below entry, raised each run to this fraction below the bid (must be below `1`). Options: kept by the bot this fraction below the bid, raised each run and never lowered; the option is sold once the bid falls to it. For example, `0.05` trails by 5%; `0` disables it. |
-| `MAX_CONSECUTIVE_LOSS` | `5`              | Consecutive losing trades allowed before the bot sets `STATE=false` in `.env`; `0` disables this kill switch.                   |
-| `MAX_OPEN_POSITIONS`   | `3`              | Maximum number of distinct open positions. Pending orders reserve a slot; additional orders for an existing symbol are allowed. |
-| `LOSS_DIRECTORY`       | `status`         | Directory, relative to the project root, for `losses.json`, which stores loss history and the consecutive-loss count.           |
-| `TRADING_START`        | `0`              | US/Eastern `HH:MM` before which no new entries are opened, e.g. `09:45`; `0` disables it.                                       |
-| `TRADING_STOP`         | `0`              | US/Eastern `HH:MM` from which no new entries are opened, e.g. `15:30`; `0` disables it.                                         |
-| `OPTION_FLATTEN_TIME`  | `15:45`          | US/Eastern `HH:MM` after which options expiring that day are closed.                                                            |
-| `GEX_FILTER`           | `true`           | 0DTE strategy only trades when the underlying's dealer net gamma exposure (GEX) is negative. `false` turns the filter off.      |
-| `GEX_THRESHOLD`        | `0`              | Net GEX, in dollars per 1% move, must be below `-GEX_THRESHOLD`. `0` accepts any negative GEX.                                  |
-| `MIN_DELTA`            | `0.30`           | Lowest absolute delta a 0DTE contract may have. With `MAX_DELTA`, sets the range the contract is picked from (0 to 1).          |
-| `MAX_DELTA`            | `0.50`           | Highest absolute delta a 0DTE contract may have. Of the contracts in range, the one closest to 0.50 is bought.                  |
-| `MARKETDATA_API_KEY`   | _(empty)_        | [MarketData.app](https://www.marketdata.app/) key for 0DTE option chains (open interest, gamma, bid/ask). Empty uses Yahoo Finance. |
+| Variable            | Default      | Description                                                                                                             |
+| ------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `ALPACA_API_KEY`    | _(empty)_    | Alpaca API key.                                                                                                         |
+| `ALPACA_SECRET_KEY` | _(empty)_    | Alpaca API secret.                                                                                                      |
+| `ALPACA_BASE_URL`   | _(empty)_    | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`. |
+| `DEMO`              | `true`       | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                        |
+| `STATE`             | `false`      | Kill switch. Orders are only placed or closed when `true`; `--balance` and `--orders` always work.                      |
+| `LOG_DIRECTORY`     | `logs`       | Folder for log files, relative to the project root. Created if missing. `--logdirectory` overrides it.                  |
+| `LOG_NAME`          | `alpaca.log` | Log file name. `--logname` overrides it.                                                                                |
+| `MAX_SIZE_IN_MB`    | `10`         | Size at which the log file rotates. Decimals allowed.                                                                   |
+| `MAX_BACKUP`        | `5`          | Number of rotated files to keep (`alpaca.log.1` … `alpaca.log.5`).                                                      |
+| `LOG_LEVEL`         | `INFO`       | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`.                                                                      |
 
-### Risk management
+Use matching API keys and `ALPACA_BASE_URL` for the same account (paper or
+live). The Alpaca SDK appends `/v2`, so provide only the base URL.
 
-- `WAGER` is applied to buying power each time a new position is opened, so
-  position size changes as the account balance changes.
-- New symbols are rejected when `MAX_OPEN_POSITIONS` is reached. Existing
-  positions and pending buy orders count toward the limit; buys that add to an
-  already-open symbol do not consume another slot.
-- A filled take-profit or trailing-stop exit is recorded as a trade outcome.
-  Once the loss streak reaches `MAX_CONSECUTIVE_LOSS`, the bot writes
-  `STATE=false` to `.env`; the next run exits without trading. Set the limit
-  to `0` to disable this automatic kill switch while keeping loss history.
-- The loss tracker is created at `LOSS_DIRECTORY/losses.json` when needed. It
-  persists across runs. To reset it after reviewing the losses, manually set
-  `STATE=true` and delete the tracker file.
-- `TRADING_START` and `TRADING_STOP` limit when new entries can open, in
-  US/Eastern time, for every strategy and asset (including crypto). Either can
-  be `0` to leave that side open; a start later than the stop wraps past
-  midnight (e.g. `20:00` to `04:00`). Signals outside the window are logged
-  and dropped. Exits still run: take-profits, stops, reversal closes, and the
-  0DTE flatten are not blocked.
-- Use matching API keys and `ALPACA_BASE_URL` for the same account (paper or
-  live). The Alpaca SDK appends `/v2`, so provide only the base URL.
+## Usage
+
+Each run performs one action, prints its result as JSON on stdout, and exits.
+Orders are always printed as a list of dictionaries, in Alpaca's order format
+(`id`, `client_order_id`, `symbol`, `side`, `qty`, `filled_qty`, `status`, …).
+
+```bash
+python src/execute.py --balance
+python src/execute.py --orders
+python src/execute.py --orders 154f558b-8bff-485b-a886-d1e8cab10dbe,my-tag-1
+python src/execute.py --asset SPY --amount 500 --position long
+python src/execute.py --asset TSLA --amount 1000 --position short --client_order_id my-tag-1
+python src/execute.py --asset BTC/USD --amount 100 --position long
+python src/execute.py --asset SPY261014C00580000 --amount 400 --position call
+python src/execute.py --close my-tag-1
+```
+
+| Argument            | Description                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `--balance`         | Account cash, equity, buying power, options buying power and portfolio value, as one dictionary.                   |
+| `--orders [IDS]`    | Without ids, the last 100 orders in any status, newest first. With comma-separated client order ids, only those orders. |
+| `--close IDS`       | Close orders by client order id (see below).                                                                        |
+| `--asset`           | Symbol to open a position in: a stock (`SPY`), a crypto pair (`BTC/USD`; `BTC` also works), or an OCC option contract. |
+| `--amount`          | Position size in USD. Required with `--asset`.                                                                      |
+| `--position`        | `long`, `short`, `call` or `put` (any case). Required with `--asset`.                                               |
+| `--client_order_id` | Client order id for the order placed by `--asset` or `--close` (one id only). Defaults to a random UUID. Max 128 characters. |
+| `--logdirectory`    | Log folder for this run, relative to the project root (an absolute path also works).                               |
+| `--logname`         | Log file name for this run.                                                                                         |
+
+`--balance`, `--orders`, `--close` and `--asset` are mutually exclusive.
+Orders are identified only by their client order id, never by Alpaca's own
+order id. Pass `--client_order_id` to choose it; otherwise a random UUID is
+used, and it is returned in the order's `client_order_id` field. Lists of ids
+can be wrapped in braces (`{id1,id2}`).
+
+### Opening positions
+
+| Position | Asset                | Order                                                                                                        |
+| -------- | -------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `long`   | Stock or crypto pair | Market buy for `--amount` dollars (rounded down to cents). Stocks are day orders, crypto GTC.               |
+| `short`  | Stock                | Market sell of the shares `--amount` covers at the bid (whole shares unless the stock is fractionable). Crypto can't be shorted. |
+| `call`   | OCC call contract    | Day limit buy at the ask for the whole contracts `--amount` covers: `floor(amount ÷ (ask × 100))`.           |
+| `put`    | OCC put contract     | As for `call`, with a put contract.                                                                           |
+
+Contract selection is the caller's job: pass the exact OCC symbol, for example
+`SPY261014C00580000` (root, `YYMMDD` expiry, `C`/`P`, strike × 1000). The
+position must match the contract type. No take-profit or stop orders are
+attached; the caller manages exits.
+
+### Closing orders
+
+`--close` takes one or more client order ids and, for each one:
+
+1. If the order is still working, cancels it and waits up to 10 seconds for
+   the cancel to settle.
+2. If nothing had filled, returns the cancelled order.
+3. Otherwise closes the filled quantity with an opposite market order (sell
+   for a buy, buy back for a short) and returns that closing order. The
+   quantity is capped at what the position still has available, since crypto
+   fees come out of the purchased coin.
+
+A close fails for that id if the position is already gone or is on the other
+side, or if another order holds the shares.
+
+### Errors and exit codes
+
+The exit code is `0` on success, `1` if anything failed, and `2` for invalid
+arguments. With several ids, a failure on one does not stop the others; it
+appears in the list as `{"id": "<id>", "error": "<message>"}`. A failed
+`--asset` returns `[{"id": "<client_order_id>", "error": "<message>"}]`.
+With `STATE=false`, `--asset` and `--close` exit with `1` and place nothing.
 
 ## Logging
 
-Importing `config` sets up logging to both the log file and the console, so
-other modules only need:
-
-```python
-import logging
-
-logger = logging.getLogger(__name__)
-```
-
-Each line has the format:
+Each run logs to the log file and to stderr, so stdout carries only the JSON
+result. Each line has the format:
 
 ```
 <UTC timestamp> <computer name> <uuid7> <module> <line number> [<message>]
@@ -130,267 +137,8 @@ Each line has the format:
 For example:
 
 ```
-2026-09-29T09:09:23.152Z DESKTOP-01 01a0ec6d-0650-7559-a5f2-50cca19d19a4 start 11 [Starting alpaca (demo=True)]
+2026-10-14T02:34:48.298Z DESKTOP-01 01a13843-2a6a-7504-b2ff-8f7d67d54cba execute 190 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]
 ```
 
-## Order tracking
-
-Order history is stored in `parent` and `child` tables in the SQLite database
-at `DB_PATH`. A parent row represents an initial entry and tracks the overall
-position lifecycle, entry order status, costs, and any manual/reversal close
-order ID, status, costs, side, quantity, and type. Each take-profit or trailing
-stop order is a child row linked to its parent; both children remain for
-history when one fills and the other is canceled.
-
-Parent overall status is `NA`, `SUBMITTED`, `PARTIAL`, `OPEN`, `CLOSING`,
-`CLOSED`, `CANCELLED`, `EXPIRED`, or `SKIPPED`. Entry and child order statuses
-reflect Alpaca (`NA`, `SUBMITTED`, `PARTIAL`, `FILLED`, `CANCELLED`, `EXPIRED`,
-or `SKIPPED`). `Trade.sync_orders()` refreshes pending entries, protective
-children, and parent close orders on each run. `close_orders()` only closes
-parent positions whose IDs start with the configured `PREFIX`.
-
-Duplicate strategy signals are claimed atomically in the risk ledger, also
-stored in the same database. This database has not been used for live orders;
-the obsolete `orders` table is dropped during initialization; no order data is
-migrated.
-
-## Run
-
-### CLI commands
-
-Pass a command after `src/start.py` to inspect account state or perform a
-risk-gated action:
-
-```bash
-python src/start.py get_balance
-python src/start.py asset AAPL
-python src/start.py get_positions
-python src/start.py get_position AAPL
-python src/start.py get_market_status
-python src/start.py open_position AAPL --side buy
-python src/start.py close_position AAPL
-```
-
-For the scheduled strategy, pass one or more comma-separated assets without a
-subcommand. Stocks use Alpaca's IEX feed; crypto pairs use crypto bars. A bare
-name that Alpaca also trades as a USD crypto pair (for example `ETH`) is
-converted to that pair with a warning, so write `NAME/USD` for crypto. Assets
-Alpaca doesn't list as tradable are skipped with an error. `BTC` is
-accepted as an alias for `BTC/USD`:
-
-```bash
-python src/start.py --assets SPY
-python src/start.py --assets SPY,AAPL,BTC/USD
-python src/start.py --assets SPY,QQQ --strategy 0dte_macd_divergence
-python src/start.py --assets SPY,QQQ --indexes SPX --strategy 0dte_macd_divergence
-python src/start.py --assets SPY,QQQ --strategy 0dte_macd15_atm
-python src/start.py --assets MSFT,AAPL,GOOG,AMZN,META,AVGO,TSLA --strategy 0dte_gamma_macd
-```
-
-`--indexes` lists index underlyings such as `SPX` or `XSP` (a leading `^` is
-optional) for `0dte_macd_divergence` and `0dte_macd15_atm`; other strategies reject it. Indexes
-skip the Alpaca asset lookup, and their bars come from Yahoo Finance (`^SPX`),
-since Alpaca has no index price data. An index passed in `--assets` instead is
-skipped with an error.
-
-`--strategy` selects the strategy from `src/strategies/`; it defaults to
-`macd_psar`.
-
-| Strategy               | Trades         | Description                                                              |
-| ---------------------- | -------------- | ------------------------------------------------------------------------ |
-| `macd_psar` (default)  | Stocks, crypto | 15-minute MACD crossover confirmed by 1- and 5-minute Parabolic SAR.     |
-| `0dte_macd_divergence` | 0DTE options   | 5-minute MACD divergence, 1-minute MACD cross, 15-minute histogram turn, negative GEX. |
-| `0dte_macd15_atm`      | 0DTE options   | First 15-minute MACD cross beyond the zero line each day; at-the-money contract. |
-| `0dte_gamma_macd`      | 0DTE options   | 15-minute MACD cross beyond the zero line in positive GEX; the highest-volume underlying with a same-day expiry is traded. |
-
-`open_position` submits a market order sized by risk using `WAGER` from `.env`.
-`close_position` closes a tracked position. Both require `STATE=true` and an
-open market; the read-only commands do not require `STATE`. With no subcommand,
-the scheduled strategy requires `--assets`, `--indexes`, or both.
-
-### Strategies
-
-Strategies live in `src/strategies/`, one module per strategy, and are
-registered by name in `src/strategies/__init__.py`. Each one only returns
-signals; `risk.py` gates and executes them.
-
-#### `macd_psar`
-
-Each asset in `--assets` is evaluated in turn, and every asset that produces a
-signal is sent on to `risk.py`. The strategy checks closed 15-minute
-MACD (12/26/9) bars for bullish crosses below zero or bearish crosses above
-zero, confirmed by Parabolic SAR on both 1-minute and 5-minute bars. Crypto
-bars come from Coinbase's public API (no key needed); stock bars come from
-Alpaca's IEX feed. It only
-returns signals; `start.py` sends them to `risk.py`, which requires `STATE=true`,
-prevents duplicate entries, applies `WAGER`, and handles protective exits and
-tracked reversals. Crypto runs 24/7, is long-only, and uses GTC orders. The
-configured `STOP_LOSS` fraction becomes a stop-limit for crypto, since
-Alpaca has no crypto trailing-stop order; each run raises it to that fraction
-below the current bid once it can move by a tenth of the trail distance, and
-never lowers it. Because the bot moves the stop once per run, it trails the
-price at the run interval, not tick by tick. A fast drop can trigger a
-stop-limit without filling it, so when a run finds the bid at or below a stop
-that has not filled, it cancels the stop and sells the remainder at market.
-Crypto position sizing uses non-marginable buying power.
-
-#### `0dte_macd_divergence`
-
-Trades options that expire the same day on the underlyings in `--assets` and
-`--indexes`, so use tickers with daily expirations such as `SPY`, `QQQ`,
-`IWM`, `SPX`, or `XSP`; crypto is skipped. For SPX, only the PM-settled `SPXW`
-contracts are used: AM-settled monthly `SPX`, `NDX`, and `RUT` options stop
-trading the day before they expire. SPX contracts cost about ten times as
-much as SPY's, so `WAGER` may only cover one, or none. A signal needs three
-timeframes to agree:
-
-1. **5-minute setup:** a regular MACD divergence within today's session. A
-   lower swing low with a higher MACD low below zero is bullish; a higher swing
-   high with a lower MACD high above zero is bearish. The second swing must be
-   at most 6 bars (30 minutes) old.
-2. **1-minute trigger:** MACD crosses its signal line in the same direction on
-   the latest closed bar. For calls, the cross must happen below the zero line
-   (MACD and signal both negative); for puts, above it (both positive).
-3. **15-minute momentum:** the MACD histogram is rising (bullish) or falling
-   (bearish).
-4. **Gamma filter** (`GEX_FILTER`): dealer net gamma exposure on the
-   underlying must be negative (below `-GEX_THRESHOLD`). GEX is the sum of
-   gamma × open interest × 100 × spot² × 1% across contracts expiring today,
-   with calls counted positive and puts negative. In negative gamma, dealer
-   hedging amplifies moves instead of damping them. If GEX can't be computed,
-   the signal is skipped.
-
-Today's option chain is fetched only after a direction is found, once per
-signal, and feeds both the GEX filter and contract selection:
-
-- With `MARKETDATA_API_KEY` set, it comes from MarketData.app, including its
-  gamma and delta. Each contract returned costs one API credit; a full SPX
-  0DTE chain is about 500 contracts.
-- Otherwise it comes from Yahoo Finance through `yfinance`. Yahoo has no
-  greeks, so gamma and delta are Black-Scholes values from each contract's
-  implied volatility and the time left to the 16:00 ET close. They are
-  approximate: the GEX filter only uses the sign of the total, but delta
-  decides which contracts are in range.
-
-Open interest is as of the prior close in both. The chosen contract must also
-be tradable on Alpaca.
-
-Entry hours come from `TRADING_START`/`TRADING_STOP`; for 0DTE, a stop well
-before `OPTION_FLATTEN_TIME` (e.g. `15:00`) leaves time for a trade to work.
-A bullish signal buys a call expiring today and a bearish signal a put. The
-contract must be out of the money (a call's strike above the underlying
-price, a put's below it), have an absolute delta from `MIN_DELTA` to `MAX_DELTA` (0.30 to 0.50 by default), and have a
-bid/ask spread within 15% of the mid price. Of those, the one Alpaca can
-trade whose delta is closest to 0.50 is bought (the strike nearest the money,
-so the priciest in the range); if none qualifies, the signal is skipped.
-The log names the contract chosen, its delta and ask.
-`risk.py` buys whole contracts with a day limit order at the ask, sized as
-`WAGER` × options buying power ÷ (ask × 100). It holds one option direction
-per underlying at a time; an opposite signal closes the tracked position and
-waits for a new signal before reversing.
-
-Exits:
-
-- a `TAKE_PROFIT` limit sell;
-- a `STOP_LOSS` trailing stop. Alpaca has no trailing stops for options, so
-  the bot keeps the stop itself: each run sets it `STOP_LOSS` below the
-  option's current bid if that is higher than the stored stop, and never
-  lowers it. The first run after entry starts it from the bid, not the fill
-  price, so the bid/ask spread doesn't trigger it at once. When a run finds
-  the bid at or below the stop, the option is sold at market. 0DTE premiums
-  swing hard, so a stock-sized `STOP_LOSS` such as `0.05` exits very quickly;
-- every option expiring that day is closed at `OPTION_FLATTEN_TIME`.
-
-Stop-loss and flatten checks only happen when the script runs, so the
-every-minute cron schedule matters. The account must be approved for options
-trading.
-
-#### `0dte_macd15_atm`
-
-Trades the same-day options of the underlyings in `--assets` and `--indexes`
-on one 15-minute MACD(12, 26, 9) signal:
-
-- **Call:** the MACD line crosses above its signal line on a closed 15-minute
-  bar while the MACD line is above zero.
-- **Put:** the MACD line crosses below its signal line while it is below zero.
-- Only the first such cross per underlying per day counts, among bars that
-  close from `TRADING_START` on; a later cross the same day is skipped. The
-  signal is acted on in the runs up to 5 minutes after that bar closes.
-- The contract is the strike nearest the underlying's price (a call or a put,
-  in or out of the money), expiring today, with a bid/ask spread within 15%
-  of the mid price; the next two nearest strikes are tried if it fails.
-- No GEX filter (`GEX_FILTER` and `GEX_THRESHOLD` are not used).
-
-Sizing (`WAGER`), the `STOP_LOSS` trailing stop, `TAKE_PROFIT`,
-`OPTION_FLATTEN_TIME`, `MAX_OPEN_POSITIONS` and the trading window apply as
-for `0dte_macd_divergence`. It was researched with entries from 10:00 to
-14:00, a 20% trailing stop, 20% of the balance per trade and positions closed
-at 15:45.
-
-#### `0dte_gamma_macd`
-
-Picks at most one 0DTE trade per run from a list of stocks, such as
-`MSFT,AAPL,GOOG,AMZN,META,AVGO,TSLA` in `--assets` (`--indexes` is rejected):
-
-1. **Signal:** on the 15-minute bar that just closed, the MACD(12, 26, 9) line
-   crosses above its signal line while above zero (call) or below it while
-   below zero (put). The signal is acted on in the runs up to 5 minutes after
-   that bar closes.
-2. **Ranking:** underlyings with a signal are sorted by average daily volume
-   over the last 20 sessions (Alpaca IEX daily bars), highest first.
-3. **0DTE and gamma:** going down that list, the first underlying with options
-   expiring today and positive dealer net gamma exposure (GEX above
-   `GEX_THRESHOLD`, computed as for `0dte_macd_divergence`) is traded. In
-   positive gamma, dealer hedging damps moves. `GEX_FILTER` is not used:
-   positive gamma is always required.
-4. **Contract:** as for `0dte_macd_divergence`, the out-of-the-money contract
-   with absolute delta from `MIN_DELTA` to `MAX_DELTA` closest to 0.50.
-5. **Exit:** no take-profit and no stop; `TAKE_PROFIT` and `STOP_LOSS` are
-   ignored for these positions. A call is sold once the underlying's 1-minute
-   MACD crosses below its signal line while below zero, and a put once it
-   crosses above while above zero, counting only bars closed after entry.
-   Without a reversal, the option is held until `OPTION_FLATTEN_TIME`. The
-   rule is stored with the entry (`exit_rule` in the `parent` table) and
-   checked by `risk.py` each run.
-
-Most single stocks only list weekly options, so they only have a same-day
-expiry on Fridays (Thursdays before a Friday holiday); on other days this
-strategy finds nothing to trade. Sizing (`WAGER`), `MAX_OPEN_POSITIONS`,
-`MAX_CONSECUTIVE_LOSS` and the trading window apply as for other strategies.
-With no stop, a contract can lose nearly all of its value before the trend
-reverses or the day ends, so `WAGER` caps the loss on each trade.
-
-`backtests/zero_dte_gamma_macd.py` replays the strategy on a year of Alpaca
-history with the risk settings from `.env` and the same exit; see its
-docstring for the approximations it makes. `--exit-macd-minutes 5` tests
-another exit timeframe, and `0` the `TAKE_PROFIT`/`STOP_LOSS` exits:
-
-```bash
-python backtests/zero_dte_gamma_macd.py --env .env --year 2025
-```
-
-Set `STATE=true` in `.env` and provide one or more assets, then:
-
-```bash
-python src/start.py --assets SPY,AAPL
-```
-
-Before running the strategy, `start.py` checks Alpaca's market clock (which
-accounts for holidays and early closes). While the market is closed, stock and
-option underlyings in `--assets` are skipped and logged ("Market closed;
-skipping strategy for ..."); crypto still runs 24/7. `risk.py` checks the clock
-again before each entry as a second guard. Take-profit reconciliation still runs
-when the market is closed.
-
-The script runs once and exits; it does not poll. Each run re-checks every
-asset for a signal, so the bot gets one chance to enter per run throughout
-the trading window, and logs "Inside trading window ...; checking ... for
-entries" each time. Housekeeping (crypto stops, order sync), the asset
-lookup and the strategy check are each guarded, so a failure in one is
-logged and the run continues. Uncaught exceptions are written to the log
-file too, since scheduled runs usually discard stderr. In production it is
-run every 60 seconds by a cron job, for example:
-
-```cron
-* * * * * cd /path/to/alpaca && .venv/bin/python src/start.py --assets SPY,AAPL
-```
+Uncaught exceptions are written to the log file too, for callers that discard
+stderr.

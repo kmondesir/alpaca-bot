@@ -27,12 +27,4 @@ Thumbs.db
 logs/
 *.log
 
-# Local database (DB_PATH)
-data/
-*.db
-*.db-journal
-
-# Consecutive-loss tracking (LOSS_DIRECTORY)
-status/
-
 context.md
