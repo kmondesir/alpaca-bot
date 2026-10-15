@@ -222,7 +222,7 @@ func (t *Trade) openShort(symbol string, amount float64, clientOrderID string) (
 	if bid <= 0 {
 		return nil, errorf("No valid bid price available to short %s", symbol)
 	}
-	// Float math, as in the Python version, so both size orders the same.
+	// Float math, as in the former Python version, so orders are sized exactly as before.
 	qty := math.Floor(amount / bid)
 	if qty <= 0 {
 		return nil, errorf("$%s is too small to short one share of %s at %s", pyFloat(amount), symbol, pyFloat(bid))
