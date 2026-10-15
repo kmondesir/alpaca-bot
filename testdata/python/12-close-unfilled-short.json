@@ -1,0 +1,18 @@
+{
+  "args": [
+    "--close",
+    "p0-1792029226-short"
+  ],
+  "env_overrides": [],
+  "exit_code": 1,
+  "stdout": [
+    {
+      "id": "p0-1792029226-short",
+      "error": "404: {\"code\":40410000,\"message\":\"order not found for p0-1792029226-short\"}"
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T01:54:03.749Z alpha 01a13d44-3965-76ee-ba6b-eeef5d17639c execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T01:54:04.172Z alpha 01a13d44-3b0c-70de-80b7-bf6cac05aa91 execute 134 [p0-1792029226-short failed: {\"code\":40410000,\"message\":\"order not found for p0-1792029226-short\"}]"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "args": [
+    "--balance",
+    "--orders"
+  ],
+  "env_overrides": [],
+  "exit_code": 2,
+  "stdout": null,
+  "stderr_tail": [
+    "                  [--client_order_id CLIENT_ORDER_ID]",
+    "                  [--logdirectory LOGDIRECTORY] [--logname LOGNAME]",
+    "execute.py: error: argument --orders: not allowed with argument --balance"
+  ]
+}

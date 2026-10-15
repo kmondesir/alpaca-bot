@@ -1,0 +1,22 @@
+{
+  "args": [
+    "--asset",
+    "F261016C00014000",
+    "--amount",
+    "5",
+    "--position",
+    "put"
+  ],
+  "env_overrides": [],
+  "exit_code": 1,
+  "stdout": [
+    {
+      "id": "e95cc9dc-2d51-4fcd-8c9b-8813d4224d40",
+      "error": "F261016C00014000 is a call, not a put"
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T01:54:10.109Z alpha 01a13d44-523d-72a5-91e9-81f928b6f382 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T01:54:10.110Z alpha 01a13d44-523e-701d-9aa8-cc8cf408af53 execute 162 [Could not open put F261016C00014000: F261016C00014000 is a call, not a put]"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "args": [
+    "--asset",
+    "F",
+    "--amount",
+    "5"
+  ],
+  "env_overrides": [],
+  "exit_code": 2,
+  "stdout": null,
+  "stderr_tail": [
+    "                  [--client_order_id CLIENT_ORDER_ID]",
+    "                  [--logdirectory LOGDIRECTORY] [--logname LOGNAME]",
+    "execute.py: error: --asset requires --position"
+  ]
+}

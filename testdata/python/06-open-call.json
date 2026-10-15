@@ -1,0 +1,57 @@
+{
+  "args": [
+    "--asset",
+    "F261016C00014000",
+    "--amount",
+    "5",
+    "--position",
+    "call",
+    "--client_order_id",
+    "p0-1792029226-call"
+  ],
+  "env_overrides": [],
+  "exit_code": 0,
+  "stdout": [
+    {
+      "id": "a5818099-5365-448c-8682-2057cb335fdb",
+      "client_order_id": "p0-1792029226-call",
+      "created_at": "2026-10-15T01:53:55.322560Z",
+      "updated_at": "2026-10-15T01:53:55.322560Z",
+      "submitted_at": "2026-10-15T01:53:55.317122Z",
+      "filled_at": null,
+      "expired_at": null,
+      "expires_at": "2026-10-15T20:00:00Z",
+      "canceled_at": null,
+      "failed_at": null,
+      "replaced_at": null,
+      "replaced_by": null,
+      "replaces": null,
+      "asset_id": "638fa5ad-b9f4-4bc6-b233-2a6a7a2f8b4f",
+      "symbol": "F261016C00014000",
+      "asset_class": "us_option",
+      "notional": null,
+      "qty": "1",
+      "filled_qty": "0",
+      "filled_avg_price": null,
+      "order_class": "simple",
+      "order_type": "limit",
+      "type": "limit",
+      "side": "buy",
+      "time_in_force": "day",
+      "limit_price": "0.03",
+      "stop_price": null,
+      "status": "accepted",
+      "extended_hours": false,
+      "legs": null,
+      "trail_percent": null,
+      "trail_price": null,
+      "hwm": null,
+      "position_intent": "buy_to_open",
+      "ratio_qty": null
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T01:53:54.537Z alpha 01a13d44-1569-7608-8b4a-efb5ac5e2287 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T01:53:55.360Z alpha 01a13d44-18a0-71a9-9bdb-491e2da7709b trade 196 [Placed limit buy 1 F261016C00014000 (a5818099-5365-448c-8682-2057cb335fdb, p0-1792029226-call)]"
+  ]
+}

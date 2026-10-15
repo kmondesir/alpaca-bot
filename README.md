@@ -17,47 +17,31 @@ repo) and fill in the variables below.
 
 ## Configuration
 
-All settings are read from `.env` by `src/config.py`. Any variable left out
-falls back to its default.
+`src/config.py` reads these four variables from `.env`. A variable already set
+in the environment wins over `.env`.
 
 ```env
+ALPACA_SECRET_KEY=
+
 # Broker config
 ALPACA_BASE_URL=https://paper-api.alpaca.markets
 ALPACA_API_KEY=
-ALPACA_SECRET_KEY=
 DEMO=true
-
-# Log file management
-LOG_DIRECTORY=C:\logs\alpaca
-LOG_NAME=alpaca.log
-MAX_SIZE_IN_MB=10
-MAX_BACKUP=5
-LOG_LEVEL=INFO
-
 ```
 
-| Variable            | Default      | Description                                                                                                             |
-| ------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `ALPACA_API_KEY`    | _(empty)_    | Alpaca API key.                                                                                                         |
-| `ALPACA_SECRET_KEY` | _(empty)_    | Alpaca API secret.                                                                                                      |
-| `ALPACA_BASE_URL`   | _(empty)_    | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`. |
-| `DEMO`              | `true`       | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                        |
-| `STATE`             | `false`      | Kill switch. Orders are only placed or closed when `true`; `--balance` and `--orders` always work. Normally set by the caller (see below), not in this `.env`. |
-| `LOG_DIRECTORY`     | `logs`       | Folder for log files, relative to the project root. Created if missing. `--logdirectory` overrides it.                  |
-| `LOG_NAME`          | `alpaca.log` | Log file name. `--logname` overrides it.                                                                                |
-| `MAX_SIZE_IN_MB`    | `10`         | Size at which the log file rotates. Decimals allowed.                                                                   |
-| `MAX_BACKUP`        | `5`          | Number of rotated files to keep (`alpaca.log.1` … `alpaca.log.5`).                                                      |
-| `LOG_LEVEL`         | `INFO`       | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`.                                                                      |
+| Variable            | Default   | Description                                                                                                             |
+| ------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `ALPACA_API_KEY`    | _(empty)_ | Alpaca API key. Required.                                                                                               |
+| `ALPACA_SECRET_KEY` | _(empty)_ | Alpaca API secret. Required.                                                                                            |
+| `ALPACA_BASE_URL`   | _(empty)_ | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`. Required. |
+| `DEMO`              | `true`    | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                        |
 
 Use matching API keys and `ALPACA_BASE_URL` for the same account (paper or
 live). The Alpaca SDK appends `/v2`, so provide only the base URL.
 
-`STATE` is left out of this `.env` because the caller owns the kill switch:
-alpaca-strategies keeps `STATE` in its own `.env` and passes it to every
-`execute.py` run in the environment. A variable already set in the
-environment wins over `.env`. Run on its own, `execute.py` falls back to
-`STATE=false` and places no orders; set `STATE=true` in the environment (or
-add it to this `.env`) to place or close orders by hand.
+This project only executes orders: every `--asset` or `--close` run places or
+closes orders. Deciding whether to trade, including any kill switch, is the
+caller's job.
 
 ## Usage
 
@@ -129,12 +113,15 @@ The exit code is `0` on success, `1` if anything failed, and `2` for invalid
 arguments. With several ids, a failure on one does not stop the others; it
 appears in the list as `{"id": "<id>", "error": "<message>"}`. A failed
 `--asset` returns `[{"id": "<client_order_id>", "error": "<message>"}]`.
-With `STATE=false`, `--asset` and `--close` exit with `1` and place nothing.
 
 ## Logging
 
 Each run logs to the log file and to stderr, so stdout carries only the JSON
-result. Each line has the format:
+result. The log file is `logs/alpaca.log` under the project root unless
+`--logdirectory` or `--logname` says otherwise. It logs at `INFO` level and
+rotates at 10 MB, keeping five old files (`alpaca.log.1` … `alpaca.log.5`).
+
+Each line has the format:
 
 ```
 <UTC timestamp> <computer name> <uuid7> <module> <line number> [<message>]
