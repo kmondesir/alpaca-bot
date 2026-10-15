@@ -28,3 +28,7 @@ logs/
 *.log
 
 context.md
+
+# Go build output
+/execute
+/execute.exe
