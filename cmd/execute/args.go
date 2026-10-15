@@ -44,8 +44,8 @@ options:
                         random UUID); with --close, only one id is allowed
   --logdirectory LOGDIRECTORY
                         log folder, relative to the project root (default:
-                        LOG_DIRECTORY)
-  --logname LOGNAME     log file name (default: LOG_NAME)`
+                        LOG_DIRECTORY, else logs)
+  --logname LOGNAME     log file name (default: LOG_NAME, else alpaca.log)`
 
 // options holds the parsed command line. Exactly one of balance, orders,
 // close and asset is set.

@@ -4,12 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 )
 
-var names = []string{"ALPACA_API_KEY", "ALPACA_SECRET_KEY", "ALPACA_BASE_URL", "DEMO"}
+var names = []string{"ALPACA_API_KEY", "ALPACA_SECRET_KEY", "ALPACA_BASE_URL", "DEMO",
+	"LOG_DIRECTORY", "LOG_NAME", "MAX_SIZE_IN_MB", "MAX_BACKUP", "LOG_LEVEL"}
 
 // unsetAll clears the settings for one test and restores them afterwards.
 func unsetAll(t *testing.T) {
@@ -41,7 +43,7 @@ func TestLoadReadsEnvFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Config{APIKey: "key", SecretKey: "secret", BaseURL: "https://paper-api.alpaca.markets", Demo: false}
+	want := Config{APIKey: "key", SecretKey: "secret", BaseURL: "https://paper-api.alpaca.markets", Demo: false, Log: defaults}
 	if got != want {
 		t.Errorf("Load = %+v, want %+v", got, want)
 	}
@@ -120,5 +122,56 @@ func TestRootDirUnderGoTestIsWorkingDirectory(t *testing.T) {
 	wd, _ := os.Getwd()
 	if root != wd {
 		t.Errorf("RootDir = %q, want the working directory %q", root, wd)
+	}
+}
+
+func TestLoadLogSettings(t *testing.T) {
+	unsetAll(t)
+	t.Setenv("LOG_NAME", "from-environment.log") // the environment still wins
+	root := writeEnv(t, `LOG_DIRECTORY=C:/logs/alpaca
+LOG_NAME=from-file.log
+MAX_SIZE_IN_MB=2.5
+MAX_BACKUP=0
+LOG_LEVEL=debug
+`)
+	got, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := LogSettings{Directory: "C:/logs/alpaca", Name: "from-environment.log", MaxSizeInMB: 2.5, MaxBackup: 0, Level: "DEBUG"}
+	if got.Log != want {
+		t.Errorf("Log = %+v, want %+v", got.Log, want)
+	}
+}
+
+func TestBlankLogSettingsUseDefaults(t *testing.T) {
+	unsetAll(t)
+	root := writeEnv(t, "LOG_DIRECTORY=\nLOG_NAME= \nMAX_SIZE_IN_MB=\nMAX_BACKUP=\nLOG_LEVEL=\n")
+	got, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Log != defaults {
+		t.Errorf("Log = %+v, want the defaults %+v", got.Log, defaults)
+	}
+}
+
+func TestInvalidLogSettings(t *testing.T) {
+	for name, value := range map[string]string{
+		"MAX_SIZE_IN_MB": "ten", "MAX_BACKUP": "2.5", "LOG_LEVEL": "LOUD",
+	} {
+		unsetAll(t)
+		t.Setenv(name, value)
+		_, err := Load(t.TempDir())
+		if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "'"+value+"'") {
+			t.Errorf("%s=%s: err = %v, want an error naming the variable and value", name, value, err)
+		}
+	}
+	for _, negative := range []string{"MAX_SIZE_IN_MB", "MAX_BACKUP"} {
+		unsetAll(t)
+		t.Setenv(negative, "-1")
+		if _, err := Load(t.TempDir()); err == nil {
+			t.Errorf("%s=-1 was accepted", negative)
+		}
 	}
 }

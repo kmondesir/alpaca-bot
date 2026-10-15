@@ -116,11 +116,14 @@ func TestRotationCountsExistingFile(t *testing.T) {
 	}
 }
 
+// defaults are the log settings Load returns with nothing set.
+var defaults = LogSettings{Directory: "logs", Name: "alpaca.log", MaxSizeInMB: 10, MaxBackup: 5, Level: "INFO"}
+
 func TestSetupLoggingDirectories(t *testing.T) {
 	root := t.TempDir()
 	defer slog.SetDefault(slog.Default())
 
-	path, closeLog, err := SetupLogging(root, "", "", io.Discard)
+	path, closeLog, err := SetupLogging(root, defaults, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +133,9 @@ func TestSetupLoggingDirectories(t *testing.T) {
 	}
 
 	absolute := filepath.Join(t.TempDir(), "elsewhere")
-	path, closeLog, err = SetupLogging(root, absolute, "execute.log", io.Discard)
+	settings := defaults
+	settings.Directory, settings.Name = absolute, "execute.log"
+	path, closeLog, err = SetupLogging(root, settings, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,12 +147,45 @@ func TestSetupLoggingDirectories(t *testing.T) {
 	}
 }
 
+func TestSetupLoggingUsesSizeBackupsAndLevel(t *testing.T) {
+	root := t.TempDir()
+	defer slog.SetDefault(slog.Default())
+	// 0.0001 MB is 104 bytes, so each record below starts a new file.
+	settings := LogSettings{Directory: "logs", Name: "small.log", MaxSizeInMB: 0.0001, MaxBackup: 2, Level: "WARNING"}
+	path, closeLog, err := SetupLogging(root, settings, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slog.Info("below the level")
+	for i := 1; i <= 4; i++ {
+		slog.Warn(fmt.Sprintf("record %d %s", i, strings.Repeat("x", 40)))
+	}
+	closeLog()
+
+	current, _ := os.ReadFile(path)
+	if !strings.Contains(string(current), "[record 4 ") {
+		t.Errorf("small.log = %q, want only record 4", current)
+	}
+	if _, err := os.Stat(path + ".2"); err != nil {
+		t.Errorf("small.log.2 missing: %v", err)
+	}
+	if _, err := os.Stat(path + ".3"); !errors.Is(err, fs.ErrNotExist) {
+		t.Error("kept more than MAX_BACKUP=2 rotated files")
+	}
+	for _, suffix := range []string{"", ".1", ".2"} {
+		content, _ := os.ReadFile(path + suffix)
+		if strings.Contains(string(content), "below the level") {
+			t.Errorf("small.log%s has an INFO line under LOG_LEVEL=WARNING", suffix)
+		}
+	}
+}
+
 // TestLogPanic runs a child test process that panics and checks it exits 1
 // and leaves the panic in the log file.
 func TestLogPanic(t *testing.T) {
 	if directory := os.Getenv("LOG_PANIC_DIR"); directory != "" {
 		defer LogPanic()
-		if _, _, err := SetupLogging(directory, "", "", os.Stderr); err != nil {
+		if _, _, err := SetupLogging(directory, defaults, os.Stderr); err != nil {
 			t.Fatal(err)
 		}
 		panic("boom")
