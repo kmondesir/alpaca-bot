@@ -1,11 +1,13 @@
 """Record execute's stdout and exit code for a fixed set of scenarios.
 
-Runs against the paper account only. The same scenarios can be replayed
-against another build of execute (such as a Go binary) and the two output
-folders compared, to check that the JSON contract hasn't changed.
+Runs against the paper account only. Replay the scenarios against a new build
+of execute and compare the output folder with testdata/python (recorded from
+the former Python version) using tools/compare_outputs.py, to check that the
+JSON contract hasn't changed. Needs Python with python-dotenv.
 
-    python tools/record_outputs.py --env ../alpaca-bot/.env --out testdata/python \
-        --cmd "python src/execute.py" --option F261016C00014000
+    go build -o execute.exe ./cmd/execute
+    python tools/record_outputs.py --env .env --out testdata/go \
+        --cmd "./execute.exe" --option F261016C00014000
 
 Each scenario is saved as <out>/<NN>-<name>.json with the arguments, the exit
 code, the parsed stdout and the last lines of stderr. Orders it opens are

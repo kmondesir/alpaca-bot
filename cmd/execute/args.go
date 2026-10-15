@@ -74,7 +74,7 @@ var negativeNumber = regexp.MustCompile(`^-\d+$|^-\d*\.\d+$`)
 
 var actions = []string{"--balance", "--orders", "--close", "--asset"}
 
-// parseArgs parses the command line the way execute.py's argparse parser did,
+// parseArgs parses the command line the way the former Python execute.py did,
 // with the same error messages. Prefix abbreviations such as --bal are not
 // accepted.
 func parseArgs(args []string) (options, error) {
