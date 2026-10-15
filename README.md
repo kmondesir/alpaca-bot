@@ -194,6 +194,9 @@ discard stderr.
 | `internal/config`  | `.env` settings, project root, log format and rotation.                  |
 | `internal/trade`   | Orders through the [Alpaca Go SDK](https://github.com/alpacahq/alpaca-trade-api-go). |
 | `internal/symbols` | Stock, crypto pair and OCC option symbol helpers.                        |
+| `tools`            | Python scripts that record and compare outputs on the paper account (below). |
+| `testdata/python`  | Outputs of the earlier Python version: the reference for the JSON contract. |
+| `testdata/go`      | The latest recording of this build, as compared with `testdata/python`.  |
 
 ```bash
 go vet ./...
@@ -206,10 +209,24 @@ The JSON output, exit codes and log format were carried over unchanged from
 the earlier Python version, which callers were written against.
 `testdata/python` holds its outputs for 28 scenarios on the paper account. To
 check that a change keeps that contract, replay the scenarios against a new
-build and compare. This needs Python with `python-dotenv`, and places and
-closes small paper orders:
+build and compare. This places and closes small paper orders, and needs a
+Python with `python-dotenv`; this project has no virtual environment of its
+own, but alpaca-strategies' `.venv` works:
 
 ```bash
 python tools/record_outputs.py --env .env --out testdata/go --cmd "./execute.exe" --option <cheap OCC call>
 python tools/compare_outputs.py testdata/python testdata/go
 ```
+
+`--option` takes an OCC call contract whose ask is at most $0.05, so `$5` buys
+one contract; the script cancels it again. Stock and option orders only fill
+while the market is open; out of hours they queue and are cancelled, and only
+the crypto scenarios fill.
+
+### Changing the command line or the output
+
+alpaca-strategies runs `execute.exe` on every scheduled run and parses its
+JSON, so it has to change with any argument, field or exit code. Make the
+caller accept both the old and the new form first, or release the two
+changes in an order that never pairs a caller with a binary that rejects its
+arguments. Rebuild `execute.exe` in the live checkout last.
