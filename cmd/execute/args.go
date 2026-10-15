@@ -19,8 +19,7 @@ const maxClientOrderID = 128
 const usage = `usage: execute [-h] (--balance | --orders [ID1,ID2] | --close ID1,ID2 |
                --asset ASSET) [--amount AMOUNT]
                [--position {long,short,call,put}]
-               [--client_order_id CLIENT_ORDER_ID]
-               [--logdirectory LOGDIRECTORY] [--logname LOGNAME]`
+               [--client_order_id CLIENT_ORDER_ID]`
 
 const help = usage + `
 
@@ -42,10 +41,9 @@ options:
   --client_order_id CLIENT_ORDER_ID
                         client_order_id for the order placed (default: a
                         random UUID); with --close, only one id is allowed
-  --logdirectory LOGDIRECTORY
-                        log folder, relative to the project root (default:
-                        LOG_DIRECTORY)
-  --logname LOGNAME     log file name (default: LOG_NAME)`
+
+Logging is set in .env: LOG_DIRECTORY, LOG_NAME, MAX_SIZE_IN_MB, MAX_BACKUP
+and LOG_LEVEL.`
 
 // options holds the parsed command line. Exactly one of balance, orders,
 // close and asset is set.
@@ -60,8 +58,6 @@ type options struct {
 	amountSet     bool
 	position      string
 	clientOrderID string
-	logDirectory  string
-	logName       string
 	help          bool
 }
 
@@ -93,7 +89,7 @@ func parseArgs(args []string) (options, error) {
 		}
 		name, inline, hasInline := strings.Cut(arg, "=")
 		if !slices.Contains([]string{"--balance", "--orders", "--close", "--asset", "--amount",
-			"--position", "--client_order_id", "--logdirectory", "--logname"}, name) {
+			"--position", "--client_order_id"}, name) {
 			unrecognized = append(unrecognized, arg)
 			continue
 		}
@@ -175,18 +171,6 @@ func parseArgs(args []string) (options, error) {
 			if opts.clientOrderID, err = parseClientOrderID(raw); err != nil {
 				return opts, fmt.Errorf("argument --client_order_id: %w", err)
 			}
-		case "--logdirectory":
-			raw, err := value()
-			if err != nil {
-				return opts, err
-			}
-			opts.logDirectory = raw
-		case "--logname":
-			raw, err := value()
-			if err != nil {
-				return opts, err
-			}
-			opts.logName = raw
 		}
 	}
 

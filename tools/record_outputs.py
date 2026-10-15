@@ -69,7 +69,7 @@ def main() -> None:
     parser.add_argument("--env", required=True, help=".env with the paper account's keys")
     parser.add_argument("--out", required=True, help="folder for the recorded outputs")
     parser.add_argument("--option", required=True, help="cheap OCC call contract to buy and cancel")
-    parser.add_argument("--logdirectory", default="logs", help="execute's log folder for these runs")
+    parser.add_argument("--logdirectory", default="logs", help="execute's log folder for these runs (LOG_DIRECTORY)")
     parser.add_argument("--tag", default=f"p0-{int(time.time())}", help="prefix for client order ids")
     args = parser.parse_args()
 
@@ -80,12 +80,13 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     command = shlex.split(args.cmd, posix=os.name != "nt")
-    log_args = ["--logdirectory", args.logdirectory, "--logname", "record.log"]
+    # execute takes its log settings from the environment, which wins over its .env.
+    log_env = {"LOG_DIRECTORY": args.logdirectory, "LOG_NAME": "record.log"}
 
     for number, (name, scenario_args, overrides) in enumerate(_scenarios(args.tag, args.option), start=1):
-        env = {**os.environ, **values, **overrides, "PYTHONIOENCODING": "utf-8"}
+        env = {**os.environ, **values, **log_env, **overrides, "PYTHONIOENCODING": "utf-8"}
         result = subprocess.run(
-            [*command, *scenario_args, *log_args],
+            [*command, *scenario_args],
             env=env,
             capture_output=True,
             text=True,

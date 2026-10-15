@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -160,8 +162,8 @@ func runWith(t *testing.T, s *stub, args ...string) (int, string, string) {
 	t.Setenv("ALPACA_API_KEY", "key")
 	t.Setenv("ALPACA_SECRET_KEY", "secret")
 	t.Setenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+	t.Setenv("LOG_DIRECTORY", t.TempDir())
 	var stdout, stderr bytes.Buffer
-	args = append(args, "--logdirectory", t.TempDir())
 	code := run(args, t.TempDir(), &stdout, &stderr, func(config.Config) trader { return s })
 	return code, strings.ReplaceAll(stdout.String(), "\r\n", "\n"), stderr.String()
 }
@@ -214,7 +216,8 @@ func TestRunMissingSettings(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	t.Setenv("ALPACA_API_KEY", "key")
 	t.Setenv("ALPACA_SECRET_KEY", "secret")
-	code := run([]string{"--balance", "--logdirectory", t.TempDir()}, t.TempDir(), &stdout, &stderr,
+	t.Setenv("LOG_DIRECTORY", t.TempDir())
+	code := run([]string{"--balance"}, t.TempDir(), &stdout, &stderr,
 		func(config.Config) trader { t.Fatal("created a trader without settings"); return nil })
 	if code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "[Missing required .env variables: ALPACA_BASE_URL; exiting]") {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
@@ -232,5 +235,31 @@ func TestRunHelp(t *testing.T) {
 	code, stdout, _ := runWith(t, &stub{}, "--help")
 	if code != 0 || !strings.Contains(stdout, "show this help message and exit") {
 		t.Errorf("exit %d, stdout %q", code, stdout)
+	}
+}
+
+func TestRunLogsWhereEnvironmentSays(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("LOG_DIRECTORY", directory)
+	t.Setenv("LOG_NAME", "from-env.log")
+	t.Setenv("ALPACA_API_KEY", "key")
+	t.Setenv("ALPACA_SECRET_KEY", "secret")
+	t.Setenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--balance"}, t.TempDir(), &stdout, &stderr, func(config.Config) trader { return &stub{} }); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(directory, "from-env.log")); err != nil {
+		t.Errorf("LOG_DIRECTORY/LOG_NAME not used: %v", err)
+	}
+}
+
+func TestRunInvalidLogSetting(t *testing.T) {
+	t.Setenv("MAX_BACKUP", "many")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--balance"}, t.TempDir(), &stdout, &stderr,
+		func(config.Config) trader { t.Fatal("created a trader with invalid settings"); return nil })
+	if code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "MAX_BACKUP must be a whole number") {
+		t.Errorf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 }

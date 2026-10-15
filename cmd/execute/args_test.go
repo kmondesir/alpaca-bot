@@ -79,12 +79,11 @@ func TestParseArgs(t *testing.T) {
 	}{
 		{[]string{"--balance"}, options{balance: true}},
 		{[]string{"--orders"}, options{ordersSet: true}},
-		{[]string{"--orders", "--logname", "x.log"}, options{ordersSet: true, logName: "x.log"}},
 		{[]string{"--orders", "{b, a ,b}"}, options{ordersSet: true, orders: []string{"b", "a"}}},
 		{[]string{"--orders={a}"}, options{ordersSet: true, orders: []string{"a"}}},
 		{[]string{"--close", "a", "--client_order_id", " tag "}, options{close: []string{"a"}, clientOrderID: "tag"}},
-		{[]string{"--asset", "SPY", "--amount=500", "--position", "Long", "--logdirectory", `C:\logs`},
-			options{asset: "SPY", assetSet: true, amount: 500, amountSet: true, position: "long", logDirectory: `C:\logs`}},
+		{[]string{"--asset", "SPY", "--amount=500", "--position", "Long"},
+			options{asset: "SPY", assetSet: true, amount: 500, amountSet: true, position: "long"}},
 		{[]string{"--balance", "--balance"}, options{balance: true}},
 	} {
 		got, err := parseArgs(c.args)
@@ -105,6 +104,8 @@ func TestParseArgsErrors(t *testing.T) {
 		{[]string{"--close", "--balance"}, "argument --close: expected one argument"},
 		{[]string{"--balance", "extra"}, "unrecognized arguments: extra"},
 		{[]string{"--balance", "--bal"}, "unrecognized arguments: --bal"},
+		{[]string{"--balance", "--logdirectory", "logs"}, "unrecognized arguments: --logdirectory logs"},
+		{[]string{"--balance", "--logname=x.log"}, "unrecognized arguments: --logname=x.log"},
 		{[]string{"--balance=yes"}, "argument --balance: ignored explicit argument 'yes'"},
 		{[]string{"--balance", "--position", "long"}, "--position is only used with --asset"},
 		{[]string{"--balance", "--client_order_id", "x"}, "--client_order_id is only used with --asset or --close"},

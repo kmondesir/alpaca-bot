@@ -1,34 +1,46 @@
-// Package config loads the Alpaca settings from .env and holds the fixed log settings.
+// Package config loads the Alpaca and log settings from .env.
 package config
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 )
 
-// Log settings. A relative LogDirectory resolves from the project root;
-// --logdirectory and --logname override the first two for a single run.
-const (
-	LogDirectory = "logs"
-	LogName      = "alpaca.log"
-	MaxSizeInMB  = 10
-	MaxBackup    = 5
-	LogLevel     = "INFO"
-)
-
-// Config holds the four settings read from the environment and .env.
+// Config holds the settings read from the environment and .env.
 type Config struct {
 	APIKey    string
 	SecretKey string
 	// BaseURL is the trading API base URL, e.g. https://paper-api.alpaca.markets, without /v2.
 	BaseURL string
 	Demo    bool
+	Log     LogSettings
+}
+
+// LogSettings says where execute logs and when the log file rotates.
+type LogSettings struct {
+	// Directory is LOG_DIRECTORY (default "logs"); a relative path resolves
+	// from the project root.
+	Directory string
+	// Name is LOG_NAME (default "alpaca.log").
+	Name string
+	// MaxSizeInMB is MAX_SIZE_IN_MB (default 10, decimals allowed): the size
+	// at which the log file rotates. 0 turns rotation off.
+	MaxSizeInMB float64
+	// MaxBackup is MAX_BACKUP (default 5): how many rotated files to keep.
+	// 0 turns rotation off.
+	MaxBackup int
+	// Level is LOG_LEVEL (default INFO): DEBUG, INFO, WARNING (or WARN),
+	// ERROR or CRITICAL, in any case. Lines below it are not written.
+	Level string
 }
 
 // Load reads root/.env into the environment and returns the settings.
@@ -39,11 +51,30 @@ func Load(root string) (Config, error) {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return Config{}, err
 	}
+	maxSize, err := strconv.ParseFloat(nonEmpty("MAX_SIZE_IN_MB", "10"), 64)
+	if err != nil || maxSize < 0 || math.IsInf(maxSize, 0) || math.IsNaN(maxSize) {
+		return Config{}, fmt.Errorf("MAX_SIZE_IN_MB must be a number of megabytes, 0 or more, not '%s'", os.Getenv("MAX_SIZE_IN_MB"))
+	}
+	maxBackup, err := strconv.Atoi(nonEmpty("MAX_BACKUP", "5"))
+	if err != nil || maxBackup < 0 {
+		return Config{}, fmt.Errorf("MAX_BACKUP must be a whole number, 0 or more, not '%s'", os.Getenv("MAX_BACKUP"))
+	}
+	level := strings.ToUpper(nonEmpty("LOG_LEVEL", "INFO"))
+	if _, ok := levels[level]; !ok {
+		return Config{}, fmt.Errorf("LOG_LEVEL must be DEBUG, INFO, WARNING, ERROR or CRITICAL, not '%s'", os.Getenv("LOG_LEVEL"))
+	}
 	return Config{
 		APIKey:    os.Getenv("ALPACA_API_KEY"),
 		SecretKey: os.Getenv("ALPACA_SECRET_KEY"),
 		BaseURL:   os.Getenv("ALPACA_BASE_URL"),
 		Demo:      strings.ToLower(getenv("DEMO", "true")) == "true",
+		Log: LogSettings{
+			Directory:   nonEmpty("LOG_DIRECTORY", "logs"),
+			Name:        nonEmpty("LOG_NAME", "alpaca.log"),
+			MaxSizeInMB: maxSize,
+			MaxBackup:   maxBackup,
+			Level:       level,
+		},
 	}, nil
 }
 
@@ -81,6 +112,14 @@ func RootDir() (string, error) {
 // NewClientOrderID returns the random UUID used as the client_order_id when the caller doesn't provide one.
 func NewClientOrderID() string {
 	return uuid.NewString()
+}
+
+// nonEmpty returns the variable's trimmed value, or fallback when it is unset or blank.
+func nonEmpty(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func getenv(name, fallback string) string {

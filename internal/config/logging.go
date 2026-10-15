@@ -26,6 +26,7 @@ var levels = map[string]slog.Level{
 	"DEBUG":    slog.LevelDebug,
 	"INFO":     slog.LevelInfo,
 	"WARNING":  slog.LevelWarn,
+	"WARN":     slog.LevelWarn,
 	"ERROR":    slog.LevelError,
 	"CRITICAL": LevelCritical,
 }
@@ -122,30 +123,26 @@ func newUUID7() string {
 	return id.String()
 }
 
-// SetupLogging logs to a rotating file and to console (stderr) through slog's default
-// logger, and returns the log file path and a function that closes the file.
+// SetupLogging logs to a rotating file and to console (stderr) through slog's
+// default logger, and returns the log file path and a function that closes
+// the file.
 //
-// directory and name override LogDirectory and LogName. A relative directory
-// resolves from root. stderr keeps stdout free for the command's JSON result.
-func SetupLogging(root, directory, name string, console io.Writer) (string, func() error, error) {
-	if directory == "" {
-		directory = LogDirectory
-	}
-	if name == "" {
-		name = LogName
-	}
+// A relative settings.Directory resolves from root. console is stderr in
+// practice, which keeps stdout free for the command's JSON result.
+func SetupLogging(root string, settings LogSettings, console io.Writer) (string, func() error, error) {
+	directory := settings.Directory
 	if !filepath.IsAbs(directory) {
 		directory = filepath.Join(root, directory)
 	}
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return "", nil, err
 	}
-	path := filepath.Join(directory, name)
-	file, err := openRotatingFile(path, MaxSizeInMB*1024*1024, MaxBackup)
+	path := filepath.Join(directory, settings.Name)
+	file, err := openRotatingFile(path, int64(settings.MaxSizeInMB*1024*1024), settings.MaxBackup)
 	if err != nil {
 		return "", nil, err
 	}
-	slog.SetDefault(slog.New(newHandler(levels[LogLevel], file, console)))
+	slog.SetDefault(slog.New(newHandler(levels[settings.Level], file, console)))
 	return path, file.Close, nil
 }
 
