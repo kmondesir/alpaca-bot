@@ -149,7 +149,7 @@ class Trade:
         )
 
     def _open_short(self, symbol: str, amount: float, client_order_id: str):
-        """Sell short the shares amount buys at the bid; notional shorts aren't allowed."""
+        """Sell short the whole shares amount buys at the bid; Alpaca rejects notional and fractional shorts."""
         if is_crypto_symbol(symbol):
             raise ValueError("Crypto short selling is unsupported")
         asset = self.get_asset_data(symbol)
@@ -158,8 +158,7 @@ class Trade:
         bid = float(asset["bid"] or 0)
         if bid <= 0:
             raise RuntimeError(f"No valid bid price available to short {symbol}")
-        scale = 1_000_000 if asset["fractionable"] else 1
-        qty = math.floor(amount / bid * scale) / scale
+        qty = math.floor(amount / bid)
         if qty <= 0:
             raise RuntimeError(f"${amount} is too small to short one share of {symbol} at {bid}")
         return self._submit(
