@@ -83,7 +83,7 @@ can be wrapped in braces (`{id1,id2}`).
 | Position | Asset                | Order                                                                                                        |
 | -------- | -------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `long`   | Stock or crypto pair | Market buy for `--amount` dollars (rounded down to cents). Stocks are day orders, crypto GTC.               |
-| `short`  | Stock                | Market sell of the shares `--amount` covers at the bid (whole shares unless the stock is fractionable). Crypto can't be shorted. |
+| `short`  | Stock                | Market sell of the whole shares `--amount` covers at the bid (Alpaca rejects fractional shorts). Crypto can't be shorted. |
 | `call`   | OCC call contract    | Day limit buy at the ask for the whole contracts `--amount` covers: `floor(amount ÷ (ask × 100))`.           |
 | `put`    | OCC put contract     | As for `call`, with a put contract.                                                                           |
 
