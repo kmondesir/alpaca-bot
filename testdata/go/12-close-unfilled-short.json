@@ -1,0 +1,50 @@
+{
+  "args": [
+    "--close",
+    "p0-1792030633-short"
+  ],
+  "env_overrides": [],
+  "exit_code": 0,
+  "stdout": [
+    {
+      "id": "adb066cb-c6a9-4337-8336-d84874fa9229",
+      "client_order_id": "p0-1792030633-short",
+      "created_at": "2026-10-15T02:17:18.793175Z",
+      "updated_at": "2026-10-15T02:17:19.164237Z",
+      "submitted_at": "2026-10-15T02:17:18.793175Z",
+      "filled_at": null,
+      "expired_at": null,
+      "canceled_at": "2026-10-15T02:17:19.164236Z",
+      "failed_at": null,
+      "replaced_at": null,
+      "replaced_by": null,
+      "replaces": null,
+      "asset_id": "1e80b378-a5e3-4727-96bf-9c64fdd4e7e2",
+      "symbol": "F",
+      "asset_class": "us_equity",
+      "notional": null,
+      "qty": "2",
+      "filled_qty": "0",
+      "filled_avg_price": null,
+      "order_class": "simple",
+      "order_type": "market",
+      "type": "market",
+      "side": "sell",
+      "time_in_force": "day",
+      "limit_price": null,
+      "stop_price": null,
+      "status": "canceled",
+      "extended_hours": false,
+      "legs": null,
+      "trail_percent": null,
+      "trail_price": null,
+      "hwm": null,
+      "position_intent": "sell_to_open",
+      "ratio_qty": null
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T02:17:18.847Z alpha 01a13d59-82ff-7bc0-a52f-dd871ca443f5 execute 81 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:17:19.284Z alpha 01a13d59-84b4-7e6b-988a-511f048df63f trade 308 [Cancelled adb066cb-c6a9-4337-8336-d84874fa9229 (canceled)]"
+  ]
+}

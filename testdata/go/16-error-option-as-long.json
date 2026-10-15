@@ -1,0 +1,22 @@
+{
+  "args": [
+    "--asset",
+    "F261016C00014000",
+    "--amount",
+    "5",
+    "--position",
+    "long"
+  ],
+  "env_overrides": [],
+  "exit_code": 1,
+  "stdout": [
+    {
+      "id": "1c4b050d-1684-4e12-93ed-3d017aa1b3d3",
+      "error": "F261016C00014000 is an option contract; use --position call"
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T02:17:20.457Z alpha 01a13d59-8949-7c9f-be75-69c686970885 execute 81 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:17:20.458Z alpha 01a13d59-894a-7563-b6ec-8e9f4f4e24f5 execute 137 [Could not open long F261016C00014000: F261016C00014000 is an option contract; use --position call]"
+  ]
+}

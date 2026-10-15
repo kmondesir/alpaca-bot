@@ -1,0 +1,22 @@
+{
+  "args": [
+    "--asset",
+    "F261016C00014000",
+    "--amount",
+    "0.01",
+    "--position",
+    "call"
+  ],
+  "env_overrides": [],
+  "exit_code": 1,
+  "stdout": [
+    {
+      "id": "094012ae-fb82-4c90-936c-f73e979dc5ee",
+      "error": "$0.01 is too small to buy one F261016C00014000 contract at 0.03 ($3.00)"
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T02:17:16.483Z alpha 01a13d59-79c3-7d86-8708-9f0dd7b33abb execute 81 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:17:16.767Z alpha 01a13d59-7adf-7561-a0fc-e47f7f1ae705 execute 137 [Could not open call F261016C00014000: $0.01 is too small to buy one F261016C00014000 contract at 0.03 ($3.00)]"
+  ]
+}

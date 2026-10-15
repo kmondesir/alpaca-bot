@@ -1,0 +1,56 @@
+{
+  "args": [
+    "--asset",
+    "F",
+    "--amount",
+    "5",
+    "--position",
+    "long",
+    "--client_order_id",
+    "p0-1792030633-long"
+  ],
+  "env_overrides": [],
+  "exit_code": 0,
+  "stdout": [
+    {
+      "id": "a543e3f9-b4bb-4aa8-b9cb-f9ff7652b370",
+      "client_order_id": "p0-1792030633-long",
+      "created_at": "2026-10-15T02:17:14.978902Z",
+      "updated_at": "2026-10-15T02:17:14.979782Z",
+      "submitted_at": "2026-10-15T02:17:14.978902Z",
+      "filled_at": null,
+      "expired_at": null,
+      "canceled_at": null,
+      "failed_at": null,
+      "replaced_at": null,
+      "replaced_by": null,
+      "replaces": null,
+      "asset_id": "1e80b378-a5e3-4727-96bf-9c64fdd4e7e2",
+      "symbol": "F",
+      "asset_class": "us_equity",
+      "notional": "5",
+      "qty": null,
+      "filled_qty": "0",
+      "filled_avg_price": null,
+      "order_class": "simple",
+      "order_type": "market",
+      "type": "market",
+      "side": "buy",
+      "time_in_force": "day",
+      "limit_price": null,
+      "stop_price": null,
+      "status": "accepted",
+      "extended_hours": false,
+      "legs": null,
+      "trail_percent": null,
+      "trail_price": null,
+      "hwm": null,
+      "position_intent": "buy_to_open",
+      "ratio_qty": null
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T02:17:14.747Z alpha 01a13d59-72fb-7272-aa18-648b6e688734 execute 81 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:17:15.016Z alpha 01a13d59-7408-75df-867f-9939214344df trade 281 [Placed market buy $5 F (a543e3f9-b4bb-4aa8-b9cb-f9ff7652b370, p0-1792030633-long)]"
+  ]
+}

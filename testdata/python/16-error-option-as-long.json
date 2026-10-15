@@ -11,12 +11,12 @@
   "exit_code": 1,
   "stdout": [
     {
-      "id": "d26cdeb2-d6de-4913-a727-a4fcf51b21f5",
+      "id": "78200b3e-cd70-4bf0-8d49-f730620a005b",
       "error": "F261016C00014000 is an option contract; use --position call"
     }
   ],
   "stderr_tail": [
-    "2026-10-15T01:54:09.178Z alpha 01a13d44-4e9a-74e9-942f-25f3b74fc96b execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
-    "2026-10-15T01:54:09.178Z alpha 01a13d44-4e9a-74e9-942f-25f4449e057e execute 162 [Could not open long F261016C00014000: F261016C00014000 is an option contract; use --position call]"
+    "2026-10-15T02:18:31.502Z alpha 01a13d5a-9ece-7334-95ad-88caf69c8fc8 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:18:31.502Z alpha 01a13d5a-9ece-7334-95ad-88cb8cf8e681 execute 162 [Could not open long F261016C00014000: F261016C00014000 is an option contract; use --position call]"
   ]
 }

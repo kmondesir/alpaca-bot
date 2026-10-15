@@ -1,0 +1,13 @@
+{
+  "args": [
+    "--balance"
+  ],
+  "env_overrides": [
+    "ALPACA_API_KEY"
+  ],
+  "exit_code": 1,
+  "stdout": null,
+  "stderr_tail": [
+    "2026-10-15T02:17:20.648Z alpha 01a13d59-8a08-7c98-b7e6-277019676b5e execute 78 [Missing required .env variables: ALPACA_API_KEY; exiting]"
+  ]
+}

@@ -1,19 +1,19 @@
 {
   "args": [
     "--close",
-    "p0-1792029226-crypto",
+    "p0-1792030689-crypto",
     "--client_order_id",
-    "p0-1792029226-crypto-close"
+    "p0-1792030689-crypto-close"
   ],
   "env_overrides": [],
   "exit_code": 0,
   "stdout": [
     {
-      "id": "9d5397ce-654b-45cb-8834-5b5fd55048a7",
-      "client_order_id": "p0-1792029226-crypto-close",
-      "created_at": "2026-10-15T01:54:05.722607Z",
-      "updated_at": "2026-10-15T01:54:05.723317Z",
-      "submitted_at": "2026-10-15T01:54:05.722607Z",
+      "id": "6064ae61-2474-4881-9f98-edb94eecf508",
+      "client_order_id": "p0-1792030689-crypto-close",
+      "created_at": "2026-10-15T02:18:28.078841Z",
+      "updated_at": "2026-10-15T02:18:28.079578Z",
+      "submitted_at": "2026-10-15T02:18:28.078841Z",
       "filled_at": null,
       "expired_at": null,
       "expires_at": "2027-01-12T21:00:00Z",
@@ -26,7 +26,7 @@
       "symbol": "BTC/USD",
       "asset_class": "crypto",
       "notional": null,
-      "qty": "0.000119822",
+      "qty": "0.00012008",
       "filled_qty": "0",
       "filled_avg_price": null,
       "order_class": "simple",
@@ -47,8 +47,8 @@
     }
   ],
   "stderr_tail": [
-    "2026-10-15T01:54:05.167Z alpha 01a13d44-3eef-7748-b793-d1edb5154570 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
-    "2026-10-15T01:54:05.760Z alpha 01a13d44-4140-7428-accd-2f53ef58d356 trade 196 [Placed market sell 0.000119822 BTC/USD (9d5397ce-654b-45cb-8834-5b5fd55048a7, p0-1792029226-crypto-close)]",
-    "2026-10-15T01:54:05.760Z alpha 01a13d44-4140-7428-accd-2f5400f3fa95 trade 249 [Closing 0.000119822 of BTC/USD for p0-1792029226-crypto]"
+    "2026-10-15T02:18:27.533Z alpha 01a13d5a-8f4d-775c-9ccd-ef982c789678 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:18:28.115Z alpha 01a13d5a-9193-7024-860a-ad5b2f7454d4 trade 195 [Placed market sell 0.00012008 BTC/USD (6064ae61-2474-4881-9f98-edb94eecf508, p0-1792030689-crypto-close)]",
+    "2026-10-15T02:18:28.116Z alpha 01a13d5a-9194-742e-9c53-032a1af872f8 trade 248 [Closing 0.00012008 of BTC/USD for p0-1792030689-crypto]"
   ]
 }

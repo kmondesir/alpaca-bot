@@ -1,0 +1,16 @@
+{
+  "args": [
+    "--close",
+    "a,b",
+    "--client_order_id",
+    "x"
+  ],
+  "env_overrides": [],
+  "exit_code": 2,
+  "stdout": null,
+  "stderr_tail": [
+    "               [--client_order_id CLIENT_ORDER_ID]",
+    "               [--logdirectory LOGDIRECTORY] [--logname LOGNAME]",
+    "execute: error: --client_order_id can only tag the close of a single order"
+  ]
+}

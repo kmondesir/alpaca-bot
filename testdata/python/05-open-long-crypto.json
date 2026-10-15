@@ -7,17 +7,17 @@
     "--position",
     "LONG",
     "--client_order_id",
-    "p0-1792029226-crypto"
+    "p0-1792030689-crypto"
   ],
   "env_overrides": [],
   "exit_code": 0,
   "stdout": [
     {
-      "id": "328cd75c-e1b5-4712-b2ff-e3169a79f4dc",
-      "client_order_id": "p0-1792029226-crypto",
-      "created_at": "2026-10-15T01:53:53.576983Z",
-      "updated_at": "2026-10-15T01:53:53.577536Z",
-      "submitted_at": "2026-10-15T01:53:53.576983Z",
+      "id": "b1152892-be7f-4fd4-9089-b6245a13756f",
+      "client_order_id": "p0-1792030689-crypto",
+      "created_at": "2026-10-15T02:18:15.988286Z",
+      "updated_at": "2026-10-15T02:18:15.988995Z",
+      "submitted_at": "2026-10-15T02:18:15.988286Z",
       "filled_at": null,
       "expired_at": null,
       "expires_at": "2027-01-12T21:00:00Z",
@@ -51,7 +51,7 @@
     }
   ],
   "stderr_tail": [
-    "2026-10-15T01:53:53.195Z alpha 01a13d44-102b-70d4-a27f-70f02725b9e4 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
-    "2026-10-15T01:53:53.614Z alpha 01a13d44-11ce-77f3-ac6a-347f09169e13 trade 196 [Placed market buy $10 BTC/USD (328cd75c-e1b5-4712-b2ff-e3169a79f4dc, p0-1792029226-crypto)]"
+    "2026-10-15T02:18:15.607Z alpha 01a13d5a-60b7-732e-aae6-6eb5d54f93f0 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:18:16.026Z alpha 01a13d5a-625a-76ea-a9c7-05c578b94495 trade 195 [Placed market buy $10 BTC/USD (b1152892-be7f-4fd4-9089-b6245a13756f, p0-1792030689-crypto)]"
   ]
 }

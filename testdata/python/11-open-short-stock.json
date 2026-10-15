@@ -7,18 +7,51 @@
     "--position",
     "short",
     "--client_order_id",
-    "p0-1792029226-short"
+    "p0-1792030689-short"
   ],
   "env_overrides": [],
-  "exit_code": 1,
+  "exit_code": 0,
   "stdout": [
     {
-      "id": "p0-1792029226-short",
-      "error": "422: {\"code\":42210000,\"message\":\"fractional orders cannot be sold short\"}"
+      "id": "15409e33-fdab-4c96-a7b9-e524e3122692",
+      "client_order_id": "p0-1792030689-short",
+      "created_at": "2026-10-15T02:18:25.075011Z",
+      "updated_at": "2026-10-15T02:18:25.076873Z",
+      "submitted_at": "2026-10-15T02:18:25.075011Z",
+      "filled_at": null,
+      "expired_at": null,
+      "expires_at": "2026-10-15T20:00:00Z",
+      "canceled_at": null,
+      "failed_at": null,
+      "replaced_at": null,
+      "replaced_by": null,
+      "replaces": null,
+      "asset_id": "1e80b378-a5e3-4727-96bf-9c64fdd4e7e2",
+      "symbol": "F",
+      "asset_class": "us_equity",
+      "notional": null,
+      "qty": "2",
+      "filled_qty": "0",
+      "filled_avg_price": null,
+      "order_class": "simple",
+      "order_type": "market",
+      "type": "market",
+      "side": "sell",
+      "time_in_force": "day",
+      "limit_price": null,
+      "stop_price": null,
+      "status": "accepted",
+      "extended_hours": false,
+      "legs": null,
+      "trail_percent": null,
+      "trail_price": null,
+      "hwm": null,
+      "position_intent": "sell_to_open",
+      "ratio_qty": null
     }
   ],
   "stderr_tail": [
-    "2026-10-15T01:54:01.971Z alpha 01a13d44-3273-740c-a7dc-6c602ee15554 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
-    "2026-10-15T01:54:02.895Z alpha 01a13d44-360f-76a2-ab25-685108818866 execute 162 [Could not open short f: {\"code\":42210000,\"message\":\"fractional orders cannot be sold short\"}]"
+    "2026-10-15T02:18:24.203Z alpha 01a13d5a-824b-72a4-b089-6fbfa81874c3 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:18:25.113Z alpha 01a13d5a-85d9-7572-8395-baa0ecba9873 trade 195 [Placed market sell 2 F (15409e33-fdab-4c96-a7b9-e524e3122692, p0-1792030689-short)]"
   ]
 }
