@@ -64,10 +64,18 @@ func run(args []string, root string, stdout, stderr io.Writer, newTrader func(co
 
 	settings, err := config.Load(root)
 	if err != nil {
-		fmt.Fprintf(stderr, "Could not read .env: %s\n", err)
+		fmt.Fprintf(stderr, "Invalid settings in .env or the environment: %s\n", err)
 		return 1
 	}
-	_, closeLog, err := config.SetupLogging(root, opts.logDirectory, opts.logName, stderr)
+	// --logdirectory and --logname win over LOG_DIRECTORY and LOG_NAME.
+	logSettings := settings.Log
+	if opts.logDirectory != "" {
+		logSettings.Directory = opts.logDirectory
+	}
+	if opts.logName != "" {
+		logSettings.Name = opts.logName
+	}
+	_, closeLog, err := config.SetupLogging(root, logSettings, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "Could not open the log file: %s\n", err)
 		return 1

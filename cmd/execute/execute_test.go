@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -232,5 +234,39 @@ func TestRunHelp(t *testing.T) {
 	code, stdout, _ := runWith(t, &stub{}, "--help")
 	if code != 0 || !strings.Contains(stdout, "show this help message and exit") {
 		t.Errorf("exit %d, stdout %q", code, stdout)
+	}
+}
+
+func TestRunLogNameFromEnvironmentAndFlag(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("LOG_DIRECTORY", directory)
+	t.Setenv("LOG_NAME", "from-env.log")
+	// runWith passes --logdirectory, so LOG_DIRECTORY is checked with run itself.
+	t.Setenv("ALPACA_API_KEY", "key")
+	t.Setenv("ALPACA_SECRET_KEY", "secret")
+	t.Setenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+	var stdout, stderr bytes.Buffer
+	trader := func(config.Config) trader { return &stub{} }
+	if code := run([]string{"--balance"}, t.TempDir(), &stdout, &stderr, trader); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(directory, "from-env.log")); err != nil {
+		t.Errorf("LOG_DIRECTORY/LOG_NAME not used: %v", err)
+	}
+	if code := run([]string{"--balance", "--logname", "from-flag.log"}, t.TempDir(), &stdout, &stderr, trader); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(directory, "from-flag.log")); err != nil {
+		t.Errorf("--logname did not win over LOG_NAME: %v", err)
+	}
+}
+
+func TestRunInvalidLogSetting(t *testing.T) {
+	t.Setenv("MAX_BACKUP", "many")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--balance"}, t.TempDir(), &stdout, &stderr,
+		func(config.Config) trader { t.Fatal("created a trader with invalid settings"); return nil })
+	if code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "MAX_BACKUP must be a whole number") {
+		t.Errorf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 }
