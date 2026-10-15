@@ -7,17 +7,17 @@
     "--position",
     "long",
     "--client_order_id",
-    "p0-1792029226-long"
+    "p0-1792030689-long"
   ],
   "env_overrides": [],
   "exit_code": 0,
   "stdout": [
     {
-      "id": "f3d6fc92-2c3c-43c6-b8a7-fa47aab3bdd5",
-      "client_order_id": "p0-1792029226-long",
-      "created_at": "2026-10-15T01:53:50.532251Z",
-      "updated_at": "2026-10-15T01:53:50.533118Z",
-      "submitted_at": "2026-10-15T01:53:50.532251Z",
+      "id": "2356350c-4902-4f9c-a703-ea084892fd35",
+      "client_order_id": "p0-1792030689-long",
+      "created_at": "2026-10-15T02:18:12.901710Z",
+      "updated_at": "2026-10-15T02:18:12.902638Z",
+      "submitted_at": "2026-10-15T02:18:12.901710Z",
       "filled_at": null,
       "expired_at": null,
       "expires_at": "2026-10-15T20:00:00Z",
@@ -51,7 +51,7 @@
     }
   ],
   "stderr_tail": [
-    "2026-10-15T01:53:50.158Z alpha 01a13d44-044e-762b-a717-d6295fefc6d9 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
-    "2026-10-15T01:53:50.570Z alpha 01a13d44-05ea-74cb-b3f4-83c10ef5fb6c trade 196 [Placed market buy $5 F (f3d6fc92-2c3c-43c6-b8a7-fa47aab3bdd5, p0-1792029226-long)]"
+    "2026-10-15T02:18:12.532Z alpha 01a13d5a-54b4-7172-8a08-56ce5a9b3280 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:18:12.939Z alpha 01a13d5a-564b-7498-948e-988ced3ba0fd trade 195 [Placed market buy $5 F (2356350c-4902-4f9c-a703-ea084892fd35, p0-1792030689-long)]"
   ]
 }

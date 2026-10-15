@@ -1,0 +1,20 @@
+{
+  "args": [
+    "--asset",
+    "F",
+    "--amount",
+    "5",
+    "--position",
+    "long",
+    "--client_order_id",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ],
+  "env_overrides": [],
+  "exit_code": 2,
+  "stdout": null,
+  "stderr_tail": [
+    "               [--client_order_id CLIENT_ORDER_ID]",
+    "               [--logdirectory LOGDIRECTORY] [--logname LOGNAME]",
+    "execute: error: argument --client_order_id: client_order_id must be 1 to 128 characters"
+  ]
+}

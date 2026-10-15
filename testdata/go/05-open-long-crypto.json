@@ -1,0 +1,56 @@
+{
+  "args": [
+    "--asset",
+    "BTC",
+    "--amount",
+    "10",
+    "--position",
+    "LONG",
+    "--client_order_id",
+    "p0-1792030633-crypto"
+  ],
+  "env_overrides": [],
+  "exit_code": 0,
+  "stdout": [
+    {
+      "id": "b204beb5-fc29-4f4d-88f8-04ce27bdb95f",
+      "client_order_id": "p0-1792030633-crypto",
+      "created_at": "2026-10-15T02:17:15.887341Z",
+      "updated_at": "2026-10-15T02:17:15.893737Z",
+      "submitted_at": "2026-10-15T02:17:15.887341Z",
+      "filled_at": null,
+      "expired_at": null,
+      "canceled_at": null,
+      "failed_at": null,
+      "replaced_at": null,
+      "replaced_by": null,
+      "replaces": null,
+      "asset_id": "276e2673-764b-4ab6-a611-caf665ca6340",
+      "symbol": "BTC/USD",
+      "asset_class": "crypto",
+      "notional": "10",
+      "qty": null,
+      "filled_qty": "0",
+      "filled_avg_price": null,
+      "order_class": "simple",
+      "order_type": "market",
+      "type": "market",
+      "side": "buy",
+      "time_in_force": "gtc",
+      "limit_price": null,
+      "stop_price": null,
+      "status": "pending_new",
+      "extended_hours": false,
+      "legs": null,
+      "trail_percent": null,
+      "trail_price": null,
+      "hwm": null,
+      "position_intent": "buy_to_open",
+      "ratio_qty": null
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T02:17:15.653Z alpha 01a13d59-7685-7155-9f30-1439c4e9afcd execute 81 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:17:15.930Z alpha 01a13d59-779a-7410-ba97-a3011ff5dcfd trade 281 [Placed market buy $10 BTC/USD (b204beb5-fc29-4f4d-88f8-04ce27bdb95f, p0-1792030633-crypto)]"
+  ]
+}

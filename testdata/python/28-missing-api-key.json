@@ -8,6 +8,6 @@
   "exit_code": 1,
   "stdout": null,
   "stderr_tail": [
-    "2026-10-15T01:54:19.434Z alpha 01a13d44-76aa-71eb-8d79-037a6a8bc9c5 execute 182 [Missing required .env variables: ALPACA_API_KEY; exiting]"
+    "2026-10-15T02:18:42.373Z alpha 01a13d5a-c945-7246-ac99-eb7e41c686bd execute 182 [Missing required .env variables: ALPACA_API_KEY; exiting]"
   ]
 }

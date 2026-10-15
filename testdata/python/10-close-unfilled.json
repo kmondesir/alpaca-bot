@@ -1,21 +1,21 @@
 {
   "args": [
     "--close",
-    "p0-1792029226-long,p0-1792029226-call"
+    "p0-1792030689-long,p0-1792030689-call"
   ],
   "env_overrides": [],
   "exit_code": 0,
   "stdout": [
     {
-      "id": "f3d6fc92-2c3c-43c6-b8a7-fa47aab3bdd5",
-      "client_order_id": "p0-1792029226-long",
-      "created_at": "2026-10-15T01:53:50.532251Z",
-      "updated_at": "2026-10-15T01:54:00.734118Z",
-      "submitted_at": "2026-10-15T01:53:50.532251Z",
+      "id": "2356350c-4902-4f9c-a703-ea084892fd35",
+      "client_order_id": "p0-1792030689-long",
+      "created_at": "2026-10-15T02:18:12.901710Z",
+      "updated_at": "2026-10-15T02:18:22.972293Z",
+      "submitted_at": "2026-10-15T02:18:12.901710Z",
       "filled_at": null,
       "expired_at": null,
       "expires_at": "2026-10-15T20:00:00Z",
-      "canceled_at": "2026-10-15T01:54:00.734116Z",
+      "canceled_at": "2026-10-15T02:18:22.972292Z",
       "failed_at": null,
       "replaced_at": null,
       "replaced_by": null,
@@ -44,15 +44,15 @@
       "ratio_qty": null
     },
     {
-      "id": "a5818099-5365-448c-8682-2057cb335fdb",
-      "client_order_id": "p0-1792029226-call",
-      "created_at": "2026-10-15T01:53:55.322560Z",
-      "updated_at": "2026-10-15T01:54:00.985404Z",
-      "submitted_at": "2026-10-15T01:53:55.317122Z",
+      "id": "db6ee783-6ca0-490e-94dd-9a5c2c1f55d3",
+      "client_order_id": "p0-1792030689-call",
+      "created_at": "2026-10-15T02:18:17.692929Z",
+      "updated_at": "2026-10-15T02:18:23.229019Z",
+      "submitted_at": "2026-10-15T02:18:17.689809Z",
       "filled_at": null,
       "expired_at": null,
       "expires_at": "2026-10-15T20:00:00Z",
-      "canceled_at": "2026-10-15T01:54:00.985403Z",
+      "canceled_at": "2026-10-15T02:18:23.229018Z",
       "failed_at": null,
       "replaced_at": null,
       "replaced_by": null,
@@ -82,8 +82,8 @@
     }
   ],
   "stderr_tail": [
-    "2026-10-15T01:54:00.272Z alpha 01a13d44-2bd0-72b5-8a4b-19491502c625 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
-    "2026-10-15T01:54:00.854Z alpha 01a13d44-2e16-7357-a7dc-fe625e271f66 trade 222 [Cancelled f3d6fc92-2c3c-43c6-b8a7-fa47aab3bdd5 (canceled)]",
-    "2026-10-15T01:54:01.107Z alpha 01a13d44-2f13-7406-9e44-b97a94e4d9a8 trade 222 [Cancelled a5818099-5365-448c-8682-2057cb335fdb (canceled)]"
+    "2026-10-15T02:18:22.507Z alpha 01a13d5a-7bab-7195-91c4-fdba1b89dbab execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:18:23.096Z alpha 01a13d5a-7df8-70a5-a567-88e57f3c3509 trade 221 [Cancelled 2356350c-4902-4f9c-a703-ea084892fd35 (canceled)]",
+    "2026-10-15T02:18:23.351Z alpha 01a13d5a-7ef7-7591-bcc8-62a0270aa40d trade 221 [Cancelled db6ee783-6ca0-490e-94dd-9a5c2c1f55d3 (canceled)]"
   ]
 }

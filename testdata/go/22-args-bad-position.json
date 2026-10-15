@@ -1,0 +1,18 @@
+{
+  "args": [
+    "--asset",
+    "F",
+    "--amount",
+    "5",
+    "--position",
+    "sideways"
+  ],
+  "env_overrides": [],
+  "exit_code": 2,
+  "stdout": null,
+  "stderr_tail": [
+    "               [--client_order_id CLIENT_ORDER_ID]",
+    "               [--logdirectory LOGDIRECTORY] [--logname LOGNAME]",
+    "execute: error: argument --position: invalid choice: 'sideways' (choose from long, short, call, put)"
+  ]
+}

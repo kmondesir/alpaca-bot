@@ -7,18 +7,18 @@
     "--position",
     "short",
     "--client_order_id",
-    "p0-1792029226-wash"
+    "p0-1792030689-wash"
   ],
   "env_overrides": [],
   "exit_code": 1,
   "stdout": [
     {
-      "id": "p0-1792029226-wash",
-      "error": "403: {\"code\":40310000,\"existing_order_id\":\"f3d6fc92-2c3c-43c6-b8a7-fa47aab3bdd5\",\"message\":\"potential wash trade detected. use complex orders\",\"reject_reason\":\"opposite side market/stop order exists\"}"
+      "id": "p0-1792030689-wash",
+      "error": "403: {\"code\":40310000,\"existing_order_id\":\"2356350c-4902-4f9c-a703-ea084892fd35\",\"message\":\"potential wash trade detected. use complex orders\",\"reject_reason\":\"opposite side market/stop order exists\"}"
     }
   ],
   "stderr_tail": [
-    "2026-10-15T01:53:51.466Z alpha 01a13d44-096a-70cb-a665-70b353907def execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
-    "2026-10-15T01:53:52.362Z alpha 01a13d44-0cea-7679-a5bf-81e6cddc45c5 execute 162 [Could not open short f: {\"code\":40310000,\"existing_order_id\":\"f3d6fc92-2c3c-43c6-b8a7-fa47aab3bdd5\",\"message\":\"potential wash trade detected. use complex orders\",\"reject_reason\":\"opposite side market/stop order exists\"}]"
+    "2026-10-15T02:18:13.767Z alpha 01a13d5a-5987-700e-918e-ab6bf3769610 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T02:18:14.670Z alpha 01a13d5a-5d0e-7210-a7a5-3eae31c94a54 execute 162 [Could not open short f: {\"code\":40310000,\"existing_order_id\":\"2356350c-4902-4f9c-a703-ea084892fd35\",\"message\":\"potential wash trade detected. use complex orders\",\"reject_reason\":\"opposite side market/stop order exists\"}]"
   ]
 }

@@ -1,0 +1,19 @@
+{
+  "args": [
+    "--balance"
+  ],
+  "env_overrides": [],
+  "exit_code": 0,
+  "stdout": {
+    "currency": "USD",
+    "cash": 9797.72,
+    "equity": 9797.72,
+    "buying_power": 39190.88,
+    "non_marginable_buying_power": 9797.72,
+    "options_buying_power": 9797.72,
+    "portfolio_value": 9797.72
+  },
+  "stderr_tail": [
+    "2026-10-15T02:17:14.162Z alpha 01a13d59-70b2-79f1-ae3c-0c19b9307233 execute 81 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]"
+  ]
+}
