@@ -122,12 +122,12 @@ func newUUID7() string {
 	return id.String()
 }
 
-// SetupLogging logs to a rotating file and to stderr through slog's default
+// SetupLogging logs to a rotating file and to console (stderr) through slog's default
 // logger, and returns the log file path and a function that closes the file.
 //
 // directory and name override LogDirectory and LogName. A relative directory
 // resolves from root. stderr keeps stdout free for the command's JSON result.
-func SetupLogging(root, directory, name string) (string, func() error, error) {
+func SetupLogging(root, directory, name string, console io.Writer) (string, func() error, error) {
 	if directory == "" {
 		directory = LogDirectory
 	}
@@ -145,7 +145,7 @@ func SetupLogging(root, directory, name string) (string, func() error, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	slog.SetDefault(slog.New(newHandler(levels[LogLevel], file, os.Stderr)))
+	slog.SetDefault(slog.New(newHandler(levels[LogLevel], file, console)))
 	return path, file.Close, nil
 }
 

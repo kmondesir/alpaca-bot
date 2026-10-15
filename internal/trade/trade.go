@@ -6,7 +6,6 @@ package trade
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -34,6 +33,17 @@ const MaxOrders = 500
 // is nothing to cancel. (done_for_day is not here: those orders resume the
 // next trading day.)
 var doneStatuses = []string{"filled", "canceled", "expired", "rejected", "replaced"}
+
+// Error is a reason Trade refused or could not finish a request, as opposed
+// to a failed connection. Callers report it, like an *alpaca.APIError, as the
+// order's error.
+type Error string
+
+func (e Error) Error() string { return string(e) }
+
+func errorf(format string, args ...any) error {
+	return Error(fmt.Sprintf(format, args...))
+}
 
 func isDone(order *alpaca.Order) bool {
 	return slices.Contains(doneStatuses, order.Status)
@@ -149,10 +159,10 @@ func (t *Trade) OpenPosition(asset string, amount float64, position, clientOrder
 	symbol := symbols.Normalize(asset)
 	position = strings.ToLower(position)
 	if !slices.Contains(Positions, position) {
-		return nil, fmt.Errorf("position must be one of %s, not '%s'", strings.Join(Positions, ", "), position)
+		return nil, errorf("position must be one of %s, not '%s'", strings.Join(Positions, ", "), position)
 	}
 	if amount <= 0 {
-		return nil, errors.New("amount must be positive")
+		return nil, Error("amount must be positive")
 	}
 	if clientOrderID == "" {
 		clientOrderID = config.NewClientOrderID()
@@ -160,15 +170,15 @@ func (t *Trade) OpenPosition(asset string, amount float64, position, clientOrder
 
 	if position == "call" || position == "put" {
 		if !symbols.IsOption(symbol) {
-			return nil, fmt.Errorf("%s needs an OCC option symbol such as SPY261014C00580000, not %s", position, symbol)
+			return nil, errorf("%s needs an OCC option symbol such as SPY261014C00580000, not %s", position, symbol)
 		}
 		if kind := symbols.OptionType(symbol); kind != position {
-			return nil, fmt.Errorf("%s is a %s, not a %s", symbol, kind, position)
+			return nil, errorf("%s is a %s, not a %s", symbol, kind, position)
 		}
 		return t.buyOption(symbol, amount, clientOrderID)
 	}
 	if symbols.IsOption(symbol) {
-		return nil, fmt.Errorf("%s is an option contract; use --position %s", symbol, symbols.OptionType(symbol))
+		return nil, errorf("%s is an option contract; use --position %s", symbol, symbols.OptionType(symbol))
 	}
 	if position == "short" {
 		return t.openShort(symbol, amount, clientOrderID)
@@ -176,7 +186,7 @@ func (t *Trade) OpenPosition(asset string, amount float64, position, clientOrder
 
 	notional := decimal.NewFromFloat(amount).RoundDown(2)
 	if !notional.IsPositive() {
-		return nil, errors.New("amount must be at least $0.01")
+		return nil, Error("amount must be at least $0.01")
 	}
 	return t.submit(alpaca.PlaceOrderRequest{
 		Symbol:        symbol,
@@ -192,14 +202,14 @@ func (t *Trade) OpenPosition(asset string, amount float64, position, clientOrder
 // rejects notional and fractional shorts.
 func (t *Trade) openShort(symbol string, amount float64, clientOrderID string) (*alpaca.Order, error) {
 	if symbols.IsCrypto(symbol) {
-		return nil, errors.New("Crypto short selling is unsupported")
+		return nil, Error("Crypto short selling is unsupported")
 	}
 	asset, err := t.client.GetAsset(symbol)
 	if err != nil {
 		return nil, err
 	}
 	if !asset.Shortable {
-		return nil, fmt.Errorf("%s is not shortable", symbol)
+		return nil, errorf("%s is not shortable", symbol)
 	}
 	quote, err := t.data.GetLatestQuote(symbol, marketdata.GetLatestQuoteRequest{})
 	if err != nil {
@@ -210,12 +220,12 @@ func (t *Trade) openShort(symbol string, amount float64, clientOrderID string) (
 		bid = quote.BidPrice
 	}
 	if bid <= 0 {
-		return nil, fmt.Errorf("No valid bid price available to short %s", symbol)
+		return nil, errorf("No valid bid price available to short %s", symbol)
 	}
 	// Float math, as in the Python version, so both size orders the same.
 	qty := math.Floor(amount / bid)
 	if qty <= 0 {
-		return nil, fmt.Errorf("$%s is too small to short one share of %s at %s", pyFloat(amount), symbol, pyFloat(bid))
+		return nil, errorf("$%s is too small to short one share of %s at %s", pyFloat(amount), symbol, pyFloat(bid))
 	}
 	shares := decimal.NewFromFloat(qty)
 	return t.submit(alpaca.PlaceOrderRequest{
@@ -239,11 +249,11 @@ func (t *Trade) buyOption(symbol string, amount float64, clientOrderID string) (
 		ask = quote.AskPrice
 	}
 	if ask <= 0 {
-		return nil, fmt.Errorf("No valid ask price available for %s", symbol)
+		return nil, errorf("No valid ask price available for %s", symbol)
 	}
 	qty := math.Floor(amount / (ask * 100))
 	if qty < 1 {
-		return nil, fmt.Errorf("$%s is too small to buy one %s contract at %s ($%.2f)",
+		return nil, errorf("$%s is too small to buy one %s contract at %s ($%.2f)",
 			pyFloat(amount), symbol, pyFloat(ask), ask*100)
 	}
 	contracts := decimal.NewFromFloat(qty)
@@ -293,7 +303,7 @@ func (t *Trade) CloseOrder(orderID, clientOrderID string) (*alpaca.Order, error)
 			return nil, err
 		}
 		if !isDone(order) {
-			return nil, fmt.Errorf("Cancel of %s is still pending (%s); retry", orderID, order.Status)
+			return nil, errorf("Cancel of %s is still pending (%s); retry", orderID, order.Status)
 		}
 		slog.Info(fmt.Sprintf("Cancelled %s (%s)", order.ID, order.Status))
 	}
@@ -308,7 +318,7 @@ func (t *Trade) CloseOrder(orderID, clientOrderID string) (*alpaca.Order, error)
 		return nil, err
 	}
 	if position == nil {
-		return nil, fmt.Errorf("No open %s position left to close for %s", order.Symbol, orderID)
+		return nil, errorf("No open %s position left to close for %s", order.Symbol, orderID)
 	}
 	heldSide := strings.ToLower(position.Side)
 	expectedSide, closingSide := "long", alpaca.Sell
@@ -316,12 +326,12 @@ func (t *Trade) CloseOrder(orderID, clientOrderID string) (*alpaca.Order, error)
 		expectedSide, closingSide = "short", alpaca.Buy
 	}
 	if heldSide != expectedSide {
-		return nil, fmt.Errorf("%s position is %s, so %s (%s) is already closed", order.Symbol, heldSide, orderID, order.Side)
+		return nil, errorf("%s position is %s, so %s (%s) is already closed", order.Symbol, heldSide, orderID, order.Side)
 	}
 	// Crypto fees come out of the purchased coin, so less than filled may be held.
 	qty := decimal.Min(filled, position.QtyAvailable.Abs())
 	if !qty.IsPositive() {
-		return nil, fmt.Errorf("No available %s to close for %s; another order may hold it", order.Symbol, orderID)
+		return nil, errorf("No available %s to close for %s; another order may hold it", order.Symbol, orderID)
 	}
 	if clientOrderID == "" {
 		clientOrderID = config.NewClientOrderID()

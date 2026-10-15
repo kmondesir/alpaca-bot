@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -119,7 +120,7 @@ func TestSetupLoggingDirectories(t *testing.T) {
 	root := t.TempDir()
 	defer slog.SetDefault(slog.Default())
 
-	path, closeLog, err := SetupLogging(root, "", "")
+	path, closeLog, err := SetupLogging(root, "", "", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +130,7 @@ func TestSetupLoggingDirectories(t *testing.T) {
 	}
 
 	absolute := filepath.Join(t.TempDir(), "elsewhere")
-	path, closeLog, err = SetupLogging(root, absolute, "execute.log")
+	path, closeLog, err = SetupLogging(root, absolute, "execute.log", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +147,7 @@ func TestSetupLoggingDirectories(t *testing.T) {
 func TestLogPanic(t *testing.T) {
 	if directory := os.Getenv("LOG_PANIC_DIR"); directory != "" {
 		defer LogPanic()
-		if _, _, err := SetupLogging(directory, "", ""); err != nil {
+		if _, _, err := SetupLogging(directory, "", "", os.Stderr); err != nil {
 			t.Fatal(err)
 		}
 		panic("boom")
