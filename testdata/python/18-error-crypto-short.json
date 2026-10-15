@@ -1,0 +1,22 @@
+{
+  "args": [
+    "--asset",
+    "BTC/USD",
+    "--amount",
+    "10",
+    "--position",
+    "short"
+  ],
+  "env_overrides": [],
+  "exit_code": 1,
+  "stdout": [
+    {
+      "id": "cb696fcb-3aa8-4e33-9857-0f0dc259f517",
+      "error": "Crypto short selling is unsupported"
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T01:54:11.022Z alpha 01a13d44-55ce-7445-880c-a15c604e091b execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T01:54:11.022Z alpha 01a13d44-55ce-7445-880c-a15d464ebf6a execute 162 [Could not open short BTC/USD: Crypto short selling is unsupported]"
+  ]
+}

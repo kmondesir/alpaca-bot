@@ -1,0 +1,24 @@
+{
+  "args": [
+    "--asset",
+    "f",
+    "--amount",
+    "30",
+    "--position",
+    "short",
+    "--client_order_id",
+    "p0-1792029226-short"
+  ],
+  "env_overrides": [],
+  "exit_code": 1,
+  "stdout": [
+    {
+      "id": "p0-1792029226-short",
+      "error": "422: {\"code\":42210000,\"message\":\"fractional orders cannot be sold short\"}"
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T01:54:01.971Z alpha 01a13d44-3273-740c-a7dc-6c602ee15554 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T01:54:02.895Z alpha 01a13d44-360f-76a2-ab25-685108818866 execute 162 [Could not open short f: {\"code\":42210000,\"message\":\"fractional orders cannot be sold short\"}]"
+  ]
+}

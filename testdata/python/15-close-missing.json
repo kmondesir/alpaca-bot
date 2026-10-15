@@ -1,0 +1,18 @@
+{
+  "args": [
+    "--close",
+    "p0-1792029226-missing"
+  ],
+  "env_overrides": [],
+  "exit_code": 1,
+  "stdout": [
+    {
+      "id": "p0-1792029226-missing",
+      "error": "404: {\"code\":40410000,\"message\":\"order not found for p0-1792029226-missing\"}"
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T01:54:07.935Z alpha 01a13d44-49bf-7423-8d95-419ce826f369 execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T01:54:08.347Z alpha 01a13d44-4b5b-7496-9dd4-2b29fb94b808 execute 134 [p0-1792029226-missing failed: {\"code\":40410000,\"message\":\"order not found for p0-1792029226-missing\"}]"
+  ]
+}

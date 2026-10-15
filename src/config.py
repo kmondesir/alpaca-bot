@@ -27,15 +27,14 @@ ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
 DEMO = os.getenv("DEMO", "true").lower() == "true"
 # Trading API base URL, e.g. https://paper-api.alpaca.markets or https://api.alpaca.markets.
 BASE_URL = os.getenv("ALPACA_BASE_URL", "")
-# Kill switch: orders are only placed or closed when STATE=true.
-STATE = os.getenv("STATE", "false").lower() == "true"
 
-# Relative LOG_DIRECTORY paths resolve from the project root.
-LOG_DIRECTORY = os.getenv("LOG_DIRECTORY", "logs")
-LOG_NAME = os.getenv("LOG_NAME", "alpaca.log")
-MAX_SIZE_IN_MB = float(os.getenv("MAX_SIZE_IN_MB", "10"))
-MAX_BACKUP = int(os.getenv("MAX_BACKUP", "5"))
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+# Log settings. A relative LOG_DIRECTORY resolves from the project root;
+# --logdirectory and --logname override the first two for a single run.
+LOG_DIRECTORY = "logs"
+LOG_NAME = "alpaca.log"
+MAX_SIZE_IN_MB = 10
+MAX_BACKUP = 5
+LOG_LEVEL = "INFO"
 
 COMPUTER_NAME = socket.gethostname()
 

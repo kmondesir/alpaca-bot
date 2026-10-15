@@ -149,12 +149,6 @@ def _run(args, trade: Trade) -> bool:
         orders, failed = _for_each_id(args.orders, trade.get_order)
         _print_result(orders)
         return not failed
-
-    # Placing and closing orders honor the STATE kill switch; lookups don't.
-    if not config.STATE:
-        logger.error("STATE is off in .env; not placing or closing orders")
-        _print_result([{"error": "STATE is off; no orders placed or closed"}])
-        return False
     if args.close is not None:
         orders, failed = _for_each_id(
             args.close, lambda order_id: trade.close_order(order_id, args.client_order_id)

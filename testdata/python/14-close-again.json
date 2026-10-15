@@ -1,0 +1,18 @@
+{
+  "args": [
+    "--close",
+    "p0-1792029226-crypto"
+  ],
+  "env_overrides": [],
+  "exit_code": 1,
+  "stdout": [
+    {
+      "id": "p0-1792029226-crypto",
+      "error": "No open BTC/USD position left to close for p0-1792029226-crypto"
+    }
+  ],
+  "stderr_tail": [
+    "2026-10-15T01:54:06.576Z alpha 01a13d44-4470-737d-9e73-509b9e5e454d execute 184 [Starting execute (demo=True, url=https://paper-api.alpaca.markets)]",
+    "2026-10-15T01:54:07.081Z alpha 01a13d44-4669-73b1-8bdd-51c521c7d416 execute 134 [p0-1792029226-crypto failed: No open BTC/USD position left to close for p0-1792029226-crypto]"
+  ]
+}
