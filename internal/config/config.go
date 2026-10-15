@@ -28,9 +28,9 @@ type Config struct {
 // LogSettings says where execute logs and when the log file rotates.
 type LogSettings struct {
 	// Directory is LOG_DIRECTORY (default "logs"); a relative path resolves
-	// from the project root. --logdirectory overrides it for a single run.
+	// from the project root.
 	Directory string
-	// Name is LOG_NAME (default "alpaca.log"). --logname overrides it.
+	// Name is LOG_NAME (default "alpaca.log").
 	Name string
 	// MaxSizeInMB is MAX_SIZE_IN_MB (default 10, decimals allowed): the size
 	// at which the log file rotates. 0 turns rotation off.

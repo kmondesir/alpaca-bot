@@ -51,8 +51,8 @@ LOG_LEVEL=INFO
 | `ALPACA_SECRET_KEY` | _(empty)_ | Alpaca API secret. Required.                                                                                            |
 | `ALPACA_BASE_URL`   | _(empty)_ | Trading API base URL, such as `https://paper-api.alpaca.markets` or `https://api.alpaca.markets`; do not include `/v2`. Required. |
 | `DEMO`              | `true`    | Demo-mode label logged at startup. Set `ALPACA_BASE_URL` to the matching paper or live endpoint.                        |
-| `LOG_DIRECTORY`     | `logs`    | Folder for log files, relative to the project root (an absolute path also works). Created if missing. `--logdirectory` overrides it. |
-| `LOG_NAME`          | `alpaca.log` | Log file name. `--logname` overrides it.                                                                             |
+| `LOG_DIRECTORY`     | `logs`    | Folder for log files, relative to the project root (an absolute path also works). Created if missing. |
+| `LOG_NAME`          | `alpaca.log` | Log file name.                                                                                                       |
 | `MAX_SIZE_IN_MB`    | `10`      | Size at which the log file rotates. Decimals allowed; `0` turns rotation off.                                           |
 | `MAX_BACKUP`        | `5`       | Number of rotated files to keep (`alpaca.log.1` … `alpaca.log.5`); `0` turns rotation off.                              |
 | `LOG_LEVEL`         | `INFO`    | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`, in any case.                                                         |
@@ -61,10 +61,20 @@ A log variable left out or left blank uses its default. An invalid number or
 level stops the run with exit code `1` and an error on stderr, before
 anything is sent to Alpaca.
 
-A caller that passes its own environment can set these too. alpaca-strategies
-does: its `.env` has the same `LOG_*`, `MAX_SIZE_IN_MB` and `MAX_BACKUP`
-names, so when it runs `execute.exe` its values win over this `.env`, and its
-`--logdirectory` and `--logname` win over both.
+Logging is set only here, not on the command line. A variable in the
+environment still wins over `.env`, so a caller must not pass its own log
+settings to `execute.exe` unless it means to. alpaca-strategies uses the same
+variable names for its own log, so its executor removes them from the
+environment it passes, and this `.env` decides where `execute` logs. To keep
+`execute`'s log next to the strategy's, set for example:
+
+```env
+LOG_DIRECTORY=C:/logs/alpaca
+LOG_NAME=execute.log
+```
+
+Don't point `LOG_NAME` at a file another program also writes: two processes
+can't share a rotating log.
 
 Use matching API keys and `ALPACA_BASE_URL` for the same account (paper or
 live). The Alpaca SDK appends `/v2`, so provide only the base URL.
@@ -99,8 +109,6 @@ Orders are always printed as a list of dictionaries, in Alpaca's order format
 | `--amount`          | Position size in USD. Required with `--asset`.                                                                      |
 | `--position`        | `long`, `short`, `call` or `put` (any case). Required with `--asset`.                                               |
 | `--client_order_id` | Client order id for the order placed by `--asset` or `--close` (one id only). Defaults to a random UUID. Max 128 characters. |
-| `--logdirectory`    | Log folder for this run, relative to the project root (an absolute path also works). Overrides `LOG_DIRECTORY`.    |
-| `--logname`         | Log file name for this run. Overrides `LOG_NAME`.                                                                   |
 | `-h`, `--help`      | Show the help text.                                                                                                 |
 
 `--balance`, `--orders`, `--close` and `--asset` are mutually exclusive.
@@ -157,9 +165,8 @@ or may not have reached Alpaca. A crash also exits with `1`.
 ## Logging
 
 Each run logs to the log file and to stderr, so stdout carries only the JSON
-result. The file is `LOG_NAME` in `LOG_DIRECTORY`, or `--logname` in
-`--logdirectory` when given; by default `logs/alpaca.log` under the project
-root. Lines below `LOG_LEVEL` are left out. The file rotates when it reaches
+result. The file is `LOG_NAME` in `LOG_DIRECTORY`; by default
+`logs/alpaca.log` under the project root. Lines below `LOG_LEVEL` are left out. The file rotates when it reaches
 `MAX_SIZE_IN_MB`, keeping `MAX_BACKUP` old files (by default 10 MB and
 `alpaca.log.1` … `alpaca.log.5`).
 
