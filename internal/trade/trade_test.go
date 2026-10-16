@@ -255,6 +255,44 @@ func TestCloseFilledShortBuysBack(t *testing.T) {
 	checkPlaced(t, fake, map[string]any{"symbol": "F", "qty": "2", "side": "buy", "time_in_force": "day"})
 }
 
+func TestCloseFilledOptionSells(t *testing.T) {
+	for _, symbol := range []string{"F261016C00014000", "F261016P00012000"} {
+		t.Run(symbol, func(t *testing.T) {
+			fake, trade := newFake(t)
+			fake.addOrder(map[string]any{
+				"client_order_id": "tag-1", "symbol": symbol, "side": "buy", "type": "limit", "status": "filled",
+				"qty": "2", "filled_qty": "2", "asset_class": "us_option",
+			})
+			fake.positions = []map[string]any{{"symbol": symbol, "asset_class": "us_option", "side": "long", "qty": "2", "qty_available": "2"}}
+			if _, err := trade.CloseOrder("tag-1", "close-1"); err != nil {
+				t.Fatal(err)
+			}
+			if len(fake.cancelled) != 0 {
+				t.Error("cancelled a filled order")
+			}
+			checkPlaced(t, fake, map[string]any{
+				"symbol": symbol, "qty": "2", "side": "sell", "type": "market", "time_in_force": "day", "client_order_id": "close-1",
+			})
+		})
+	}
+}
+
+func TestClosePartlyFilledOption(t *testing.T) {
+	fake, trade := newFake(t)
+	fake.onCancel = func(order map[string]any) { order["status"] = "canceled"; order["filled_qty"] = "1" }
+	fake.addOrder(map[string]any{
+		"client_order_id": "tag-1", "symbol": "F261016P00012000", "side": "buy", "type": "limit", "qty": "3", "asset_class": "us_option",
+	})
+	fake.positions = []map[string]any{{"symbol": "F261016P00012000", "asset_class": "us_option", "side": "long", "qty": "1", "qty_available": "1"}}
+	if _, err := trade.CloseOrder("tag-1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.cancelled) != 1 {
+		t.Errorf("cancelled %v, want the working order cancelled first", fake.cancelled)
+	}
+	checkPlaced(t, fake, map[string]any{"symbol": "F261016P00012000", "qty": "1", "side": "sell", "type": "market", "time_in_force": "day"})
+}
+
 func TestCloseErrors(t *testing.T) {
 	for _, c := range []struct {
 		name     string
