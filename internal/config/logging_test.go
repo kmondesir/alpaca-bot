@@ -27,7 +27,7 @@ func TestLineFormat(t *testing.T) {
 	var buffer bytes.Buffer
 	logger := slog.New(newHandler(slog.LevelInfo, &buffer))
 	_, _, line, _ := runtime.Caller(0)
-	logger.Info(fmt.Sprintf("Starting execute (demo=%v)", true)) // must stay on the line after runtime.Caller
+	logger.Info(fmt.Sprintf("Starting alpaca (demo=%v)", true)) // must stay on the line after runtime.Caller
 	logger.Info("second", "id", "abc")
 
 	lines := strings.Split(strings.TrimSuffix(buffer.String(), newline), newline)
@@ -48,7 +48,7 @@ func TestLineFormat(t *testing.T) {
 	if first[4] != "logging_test" || first[5] != fmt.Sprint(line+1) {
 		t.Errorf("source = %s %s, want logging_test %d", first[4], first[5], line+1)
 	}
-	if first[6] != "Starting execute (demo=true)" {
+	if first[6] != "Starting alpaca (demo=true)" {
 		t.Errorf("message = %q", first[6])
 	}
 	second := linePattern.FindStringSubmatch(lines[1])
@@ -134,14 +134,14 @@ func TestSetupLoggingDirectories(t *testing.T) {
 
 	absolute := filepath.Join(t.TempDir(), "elsewhere")
 	settings := defaults
-	settings.Directory, settings.Name = absolute, "execute.log"
+	settings.Directory, settings.Name = absolute, "alpaca.log"
 	path, closeLog, err = SetupLogging(root, settings, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
 	slog.Info("written")
 	closeLog()
-	content, err := os.ReadFile(filepath.Join(absolute, "execute.log"))
+	content, err := os.ReadFile(filepath.Join(absolute, "alpaca.log"))
 	if err != nil || !strings.Contains(string(content), "[written]") {
 		t.Errorf("absolute directory: read %q, %v", content, err)
 	}

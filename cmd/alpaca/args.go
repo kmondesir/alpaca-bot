@@ -16,10 +16,10 @@ import (
 // maxClientOrderID is the most characters Alpaca allows in a client_order_id.
 const maxClientOrderID = 128
 
-const usage = `usage: execute [-h] (--balance | --orders [ID1,ID2] | --close ID1,ID2 |
-               --asset ASSET) [--amount AMOUNT]
-               [--position {long,short,call,put}]
-               [--client_order_id CLIENT_ORDER_ID]`
+const usage = `usage: alpaca [-h] (--balance | --orders [ID1,ID2] | --close ID1,ID2 |
+              --asset ASSET) [--amount AMOUNT]
+              [--position {long,short,call,put}]
+              [--client_order_id CLIENT_ORDER_ID]`
 
 const help = usage + `
 

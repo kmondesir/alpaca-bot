@@ -1,13 +1,13 @@
-// Command execute places, looks up and closes Alpaca orders.
+// Command alpaca places, looks up and closes Alpaca orders.
 //
 // It prints the result as JSON on stdout; orders are always a list. Logs go
 // to the log file and stderr.
 //
-//	execute --balance
-//	execute --orders
-//	execute --orders ID1,ID2
-//	execute --asset SPY --amount 500 --position long [--client_order_id TAG]
-//	execute --close ID1,ID2
+//	alpaca --balance
+//	alpaca --orders
+//	alpaca --orders ID1,ID2
+//	alpaca --asset SPY --amount 500 --position long [--client_order_id TAG]
+//	alpaca --close ID1,ID2
 //
 // Exit codes: 0 on success, 1 if anything failed, 2 for invalid arguments.
 package main
@@ -30,7 +30,7 @@ import (
 // recentOrders is how many orders --orders lists without ids.
 const recentOrders = 100
 
-// trader is what execute needs from trade.Trade.
+// trader is what alpaca needs from trade.Trade.
 type trader interface {
 	GetBalance() (trade.Balance, error)
 	GetOrders(limit int) ([]alpaca.Order, error)
@@ -58,7 +58,7 @@ func run(args []string, root string, stdout, stderr io.Writer, newTrader func(co
 		return 0
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "%s\nexecute: error: %s\n", usage, err)
+		fmt.Fprintf(stderr, "%s\nalpaca: error: %s\n", usage, err)
 		return 2
 	}
 
@@ -78,7 +78,7 @@ func run(args []string, root string, stdout, stderr io.Writer, newTrader func(co
 		slog.Error(fmt.Sprintf("Missing required .env variables: %s; exiting", strings.Join(missing, ", ")))
 		return 1
 	}
-	slog.Info(fmt.Sprintf("Starting execute (demo=%s, url=%s)", pyBool(settings.Demo), settings.BaseURL))
+	slog.Info(fmt.Sprintf("Starting alpaca (demo=%s, url=%s)", pyBool(settings.Demo), settings.BaseURL))
 
 	result, ok, err := execute(opts, newTrader(settings))
 	if err != nil {

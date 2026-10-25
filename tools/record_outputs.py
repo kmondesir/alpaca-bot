@@ -1,13 +1,13 @@
-"""Record execute's stdout and exit code for a fixed set of scenarios.
+"""Record alpaca's stdout and exit code for a fixed set of scenarios.
 
 Runs against the paper account only. Replay the scenarios against a new build
-of execute and compare the output folder with testdata/python (recorded from
+of alpaca and compare the output folder with testdata/python (recorded from
 the former Python version) using tools/compare_outputs.py, to check that the
 JSON contract hasn't changed. Needs Python with python-dotenv.
 
-    go build -o execute.exe ./cmd/execute
+    go build -o alpaca.exe ./cmd/alpaca
     python tools/record_outputs.py --env .env --out testdata/go \
-        --cmd "./execute.exe" --option F261016C00014000
+        --cmd "./alpaca.exe" --option F261016C00014000
 
 Each scenario is saved as <out>/<NN>-<name>.json with the arguments, the exit
 code, the parsed stdout and the last lines of stderr. Orders it opens are
@@ -65,11 +65,11 @@ def _scenarios(tag: str, option: str) -> list:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--cmd", required=True, help='command that runs execute, e.g. "python src/execute.py"')
+    parser.add_argument("--cmd", required=True, help='command that runs alpaca, e.g. "./alpaca.exe"')
     parser.add_argument("--env", required=True, help=".env with the paper account's keys")
     parser.add_argument("--out", required=True, help="folder for the recorded outputs")
     parser.add_argument("--option", required=True, help="cheap OCC call contract to buy and cancel")
-    parser.add_argument("--logdirectory", default="logs", help="execute's log folder for these runs (LOG_DIRECTORY)")
+    parser.add_argument("--logdirectory", default="logs", help="alpaca's log folder for these runs (LOG_DIRECTORY)")
     parser.add_argument("--tag", default=f"p0-{int(time.time())}", help="prefix for client order ids")
     args = parser.parse_args()
 
@@ -80,7 +80,7 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     command = shlex.split(args.cmd, posix=os.name != "nt")
-    # execute takes its log settings from the environment, which wins over its .env.
+    # alpaca takes its log settings from the environment, which wins over its .env.
     log_env = {"LOG_DIRECTORY": args.logdirectory, "LOG_NAME": "record.log"}
 
     for number, (name, scenario_args, overrides) in enumerate(_scenarios(args.tag, args.option), start=1):
