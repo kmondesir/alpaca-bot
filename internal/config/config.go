@@ -25,7 +25,7 @@ type Config struct {
 	Log     LogSettings
 }
 
-// LogSettings says where execute logs and when the log file rotates.
+// LogSettings says where alpaca logs and when the log file rotates.
 type LogSettings struct {
 	// Directory is LOG_DIRECTORY (default "logs"); a relative path resolves
 	// from the project root.

@@ -156,7 +156,7 @@ func (s *stub) CloseOrder(id, _ string) (*alpaca.Order, error) {
 	return s.GetOrder(id)
 }
 
-// runWith runs execute with the stub and returns the exit code, stdout and stderr.
+// runWith runs alpaca with the stub and returns the exit code, stdout and stderr.
 func runWith(t *testing.T, s *stub, args ...string) (int, string, string) {
 	t.Helper()
 	t.Setenv("ALPACA_API_KEY", "key")
@@ -170,7 +170,7 @@ func runWith(t *testing.T, s *stub, args ...string) (int, string, string) {
 
 func TestRunBalance(t *testing.T) {
 	code, stdout, stderr := runWith(t, &stub{}, "--balance")
-	if code != 0 || !strings.Contains(stdout, `"cash": 10,`) || !strings.Contains(stderr, "[Starting execute (demo=True, url=https://paper-api.alpaca.markets)]") {
+	if code != 0 || !strings.Contains(stdout, `"cash": 10,`) || !strings.Contains(stderr, "[Starting alpaca (demo=True, url=https://paper-api.alpaca.markets)]") {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }
@@ -226,7 +226,7 @@ func TestRunMissingSettings(t *testing.T) {
 
 func TestRunInvalidArguments(t *testing.T) {
 	code, stdout, stderr := runWith(t, &stub{}, "--amount", "5")
-	if code != 2 || stdout != "" || !strings.HasSuffix(stderr, "execute: error: one of the arguments --balance --orders --close --asset is required\n") {
+	if code != 2 || stdout != "" || !strings.HasSuffix(stderr, "alpaca: error: one of the arguments --balance --orders --close --asset is required\n") {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }

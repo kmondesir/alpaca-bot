@@ -32,6 +32,8 @@ context.md
 # Go build output
 /execute
 /execute.exe
+/alpaca
+/alpaca.exe
 
 # Local notes for Claude Code
 CLAUDE.local.md
