@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -31,6 +33,48 @@ var levels = map[string]slog.Level{
 	"CRITICAL": LevelCritical,
 }
 
+// levelName returns the level as Python names it (WARNING, not WARN).
+func levelName(level slog.Level) string {
+	switch level {
+	case slog.LevelDebug:
+		return "DEBUG"
+	case slog.LevelInfo:
+		return "INFO"
+	case slog.LevelWarn:
+		return "WARNING"
+	case slog.LevelError:
+		return "ERROR"
+	case LevelCritical:
+		return "CRITICAL"
+	}
+	return level.String()
+}
+
+// hostFQDN returns the computer's fully qualified name, found as Python's
+// socket.getfqdn finds it: the first name with a dot among the names its
+// addresses resolve to, or the plain host name when none has one.
+var hostFQDN = sync.OnceValue(func() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "?"
+	}
+	if strings.Contains(hostname, ".") {
+		return hostname
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	addrs, _ := net.DefaultResolver.LookupHost(ctx, hostname)
+	for _, addr := range addrs {
+		names, _ := net.DefaultResolver.LookupAddr(ctx, addr)
+		for _, name := range names {
+			if name = strings.TrimSuffix(name, "."); strings.Contains(name, ".") {
+				return name
+			}
+		}
+	}
+	return hostname
+})
+
 // newline matches what Python's text-mode log files and stderr write.
 var newline = func() string {
 	if runtime.GOOS == "windows" {
@@ -41,20 +85,21 @@ var newline = func() string {
 
 // handler writes each record as
 //
-//	<UTC timestamp> <computer name> <uuid7> <module> <line number> [<message>]
+//	<UTC timestamp> <level> <host FQDN> <run uuid7> <module> <line number> [<message>]
 //
-// where module is the calling file's name without .go, as in the Python logs.
+// where module is the calling file's name without .go, as in the Python logs,
+// and the uuid7 is the same on every line of one run.
 type handler struct {
-	mu       *sync.Mutex
-	writers  []io.Writer
-	level    slog.Level
-	computer string
-	attrs    []slog.Attr
+	mu      *sync.Mutex
+	writers []io.Writer
+	level   slog.Level
+	host    string
+	runID   string
+	attrs   []slog.Attr
 }
 
 func newHandler(level slog.Level, writers ...io.Writer) *handler {
-	computer, _ := os.Hostname()
-	return &handler{mu: &sync.Mutex{}, writers: writers, level: level, computer: computer}
+	return &handler{mu: &sync.Mutex{}, writers: writers, level: level, host: hostFQDN(), runID: newUUID7()}
 }
 
 func (h *handler) Enabled(_ context.Context, level slog.Level) bool {
@@ -85,8 +130,8 @@ func (h *handler) Handle(_ context.Context, record slog.Record) error {
 	record.Attrs(addAttr)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s %s %s %s %d [%s]",
-		record.Time.UTC().Format("2006-01-02T15:04:05.000Z"), h.computer, newUUID7(), module, line, message)
+	fmt.Fprintf(&b, "%s %s %s %s %s %d [%s]",
+		record.Time.UTC().Format("2006-01-02T15:04:05.000Z"), levelName(record.Level), h.host, h.runID, module, line, message)
 	if stack != "" {
 		b.WriteString(newline)
 		b.WriteString(strings.ReplaceAll(strings.TrimRight(stack, "\n"), "\n", newline))

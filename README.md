@@ -173,14 +173,17 @@ result. The file is `LOG_NAME` in `LOG_DIRECTORY`; by default
 Each line has the format:
 
 ```
-<UTC timestamp> <computer name> <uuid7> <module> <line number> [<message>]
+<UTC timestamp> <level> <host FQDN> <run uuid7> <module> <line number> [<message>]
 ```
 
-where `<module>` is the Go source file the line was logged from, without
-`.go`. For example:
+where `<level>` is `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`,
+`<host FQDN>` is the computer's fully qualified name (the plain computer name
+when it has no domain), `<run uuid7>` is the same on every line of one run, and
+`<module>` is the Go source file the line was logged from, without `.go`. For
+example:
 
 ```
-2026-10-15T02:39:18.820Z DESKTOP-01 01a13d6d-a724-7079-8058-478dcaa94a7d alpaca 81 [Starting alpaca (demo=True, url=https://paper-api.alpaca.markets)]
+2026-10-15T02:39:18.820Z INFO DESKTOP-01 01a13d6d-a724-7079-8058-478dcaa94a7d alpaca 81 [Starting alpaca (demo=True, url=https://paper-api.alpaca.markets)]
 ```
 
 A crash is written to the log file with its stack trace, for callers that
