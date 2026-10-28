@@ -18,17 +18,17 @@ import (
 	"github.com/google/uuid"
 )
 
-// linePattern is the Python log format:
-// <UTC timestamp> <computer name> <uuid7> <module> <line number> [<message>]
+// linePattern is the log format:
+// <UTC timestamp> <level> <host FQDN> <run uuid7> <module> <line number> [<message>]
 var linePattern = regexp.MustCompile(
-	`^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z) (\S+) ([0-9a-f-]{36}) (\S+) (\d+) \[(.*)\]$`)
+	`^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z) ([A-Z]+) (\S+) ([0-9a-f-]{36}) (\S+) (\d+) \[(.*)\]$`)
 
 func TestLineFormat(t *testing.T) {
 	var buffer bytes.Buffer
 	logger := slog.New(newHandler(slog.LevelInfo, &buffer))
 	_, _, line, _ := runtime.Caller(0)
 	logger.Info(fmt.Sprintf("Starting alpaca (demo=%v)", true)) // must stay on the line after runtime.Caller
-	logger.Info("second", "id", "abc")
+	logger.Warn("second", "id", "abc")
 
 	lines := strings.Split(strings.TrimSuffix(buffer.String(), newline), newline)
 	if len(lines) != 2 {
@@ -38,25 +38,27 @@ func TestLineFormat(t *testing.T) {
 	if first == nil {
 		t.Fatalf("line %q does not match the log format", lines[0])
 	}
-	hostname, _ := os.Hostname()
-	if first[2] != hostname {
-		t.Errorf("computer name = %q, want %q", first[2], hostname)
+	if first[2] != "INFO" {
+		t.Errorf("level = %q, want INFO", first[2])
 	}
-	if id, err := uuid.Parse(first[3]); err != nil || id.Version() != 7 {
-		t.Errorf("id %q is not a uuid7", first[3])
+	if first[3] != hostFQDN() {
+		t.Errorf("host = %q, want %q", first[3], hostFQDN())
 	}
-	if first[4] != "logging_test" || first[5] != fmt.Sprint(line+1) {
-		t.Errorf("source = %s %s, want logging_test %d", first[4], first[5], line+1)
+	if id, err := uuid.Parse(first[4]); err != nil || id.Version() != 7 {
+		t.Errorf("id %q is not a uuid7", first[4])
 	}
-	if first[6] != "Starting alpaca (demo=true)" {
-		t.Errorf("message = %q", first[6])
+	if first[5] != "logging_test" || first[6] != fmt.Sprint(line+1) {
+		t.Errorf("source = %s %s, want logging_test %d", first[5], first[6], line+1)
+	}
+	if first[7] != "Starting alpaca (demo=true)" {
+		t.Errorf("message = %q", first[7])
 	}
 	second := linePattern.FindStringSubmatch(lines[1])
-	if second == nil || second[6] != "second id=abc" {
-		t.Errorf("second line = %q, want message %q", lines[1], "second id=abc")
+	if second == nil || second[7] != "second id=abc" || second[2] != "WARNING" {
+		t.Errorf("second line = %q, want WARNING and message %q", lines[1], "second id=abc")
 	}
-	if second != nil && second[3] == first[3] {
-		t.Error("two lines share a uuid7")
+	if second != nil && second[4] != first[4] {
+		t.Error("lines of one run have different uuid7s")
 	}
 }
 
@@ -67,6 +69,14 @@ func TestLevelFilter(t *testing.T) {
 	logger.Warn("shown")
 	if strings.Contains(buffer.String(), "hidden") || !strings.Contains(buffer.String(), "[shown]") {
 		t.Errorf("INFO level wrote %q", buffer.String())
+	}
+}
+
+func TestLevelNames(t *testing.T) {
+	for name, want := range map[string]string{"DEBUG": "DEBUG", "INFO": "INFO", "WARN": "WARNING", "WARNING": "WARNING", "ERROR": "ERROR", "CRITICAL": "CRITICAL"} {
+		if got := levelName(levels[name]); got != want {
+			t.Errorf("levelName(%s) = %q, want %q", name, got, want)
+		}
 	}
 }
 
